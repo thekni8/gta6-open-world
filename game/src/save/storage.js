@@ -1,44 +1,36 @@
-// Save — localStorage. Mission progress, cash, completed missions and the
-// player's position survive a reload; the wanted level never does.
-import { SAVE_KEY } from '../config.js';
+// localStorage save: mission progress, cash, and where Kai was standing.
+// Wanted level is never saved — a fresh session starts clean, as the
+// design brief requires.
 
-export function saveGame(g) {
-  try {
-    const data = {
-      cash: g.player.cash,
-      missionIndex: g.mission.index,
-      completed: g.mission.completed,
-      choice: g.mission.choice,
-      x: g.player.pos.x,
-      z: g.player.pos.z,
-      health: g.player.health,
-      ammo: g.combat.ammo,
-      reserve: g.combat.reserve,
-      savedAt: Date.now(),
-    };
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { CONFIG } from '../config.js';
 
-export function loadGame() {
-  try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (typeof data.cash !== 'number') return null;
-    return data;
-  } catch {
-    return null;
-  }
-}
+export const Save = {
+  load() {
+    try {
+      const raw = localStorage.getItem(CONFIG.saveKey);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (typeof data !== 'object' || data === null) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  },
 
-export function clearSave() {
-  try {
-    window.localStorage.removeItem(SAVE_KEY);
-  } catch {
-    // Storage can be off: nothing to clear.
-  }
-}
+  write(data) {
+    try {
+      localStorage.setItem(CONFIG.saveKey, JSON.stringify(data));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  clear() {
+    try {
+      localStorage.removeItem(CONFIG.saveKey);
+    } catch {
+      // Storage unavailable — the game still plays, it just won't save.
+    }
+  },
+};

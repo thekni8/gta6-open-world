@@ -1,55 +1,67 @@
-// Menus — start screen (New Game / Continue / Controls), pause, mission
-// complete/fail and game over. Plain DOM overlays the game canvas hides or shows.
-export const SCREEN_TITLE = 'title';
-export const SCREEN_PLAY = 'play';
-export const SCREEN_PAUSED = 'paused';
-export const SCREEN_OVER = 'over';
+// Menus: the start screen (New Game / Continue / Controls), the pause
+// menu, and the mission complete / failed screens. All DOM; the game
+// logic lives in main.js and calls back in through the handlers.
 
-export function createMenus() {
-  return {
-    title: document.getElementById('menu-title'),
-    pause: document.getElementById('menu-pause'),
-    over: document.getElementById('menu-over'),
-    help: document.getElementById('menu-help'),
-    titleButtons: document.getElementById('title-buttons'),
-    continueBtn: document.getElementById('btn-continue'),
-    newBtn: document.getElementById('btn-new'),
-    helpBtn: document.getElementById('btn-help'),
-    helpClose: document.getElementById('btn-help-close'),
-    resumeBtn: document.getElementById('btn-resume'),
-    quitBtn: document.getElementById('btn-quit'),
-    retryBtn: document.getElementById('btn-retry'),
-    overTitle: document.getElementById('over-title'),
-    overText: document.getElementById('over-text'),
-    pauseCash: document.getElementById('pause-cash'),
-  };
-}
-
-export function showScreen(menus, screen, g) {
-  menus.title.style.display = screen === SCREEN_TITLE ? 'flex' : 'none';
-  menus.pause.style.display = screen === SCREEN_PAUSED ? 'flex' : 'none';
-  menus.over.style.display = screen === SCREEN_OVER ? 'flex' : 'none';
-  menus.help.style.display = 'none';
-  if (screen === SCREEN_TITLE) {
-    menus.continueBtn.style.display = g && g.hasSave ? 'block' : 'none';
+export class Menus {
+  constructor(handlers) {
+    this.h = handlers;
+    this.el = {
+      start: document.getElementById('menu-start'),
+      pause: document.getElementById('menu-pause'),
+      end: document.getElementById('menu-end'),
+      endTitle: document.getElementById('end-title'),
+      endText: document.getElementById('end-text'),
+      btnEndNext: document.getElementById('btn-end-next'),
+      btnEndRetry: document.getElementById('btn-end-retry'),
+      controls: document.getElementById('controls-panel'),
+      btnContinue: document.getElementById('btn-continue'),
+    };
+    document.getElementById('btn-new').addEventListener('click', () => this.h.newGame());
+    this.el.btnContinue.addEventListener('click', () => this.h.continueGame());
+    document.getElementById('btn-controls').addEventListener('click', () => {
+      this.el.controls.classList.toggle('hidden');
+    });
+    document.getElementById('btn-resume').addEventListener('click', () => this.h.resume());
+    document.getElementById('btn-restart').addEventListener('click', () => this.h.restartMission());
+    document.getElementById('btn-quit').addEventListener('click', () => this.h.quitToMenu());
+    document.getElementById('btn-mute').addEventListener('click', (e) => {
+      const muted = this.h.toggleMute();
+      e.target.textContent = muted ? 'Sound: OFF' : 'Sound: ON';
+    });
+    this.el.btnEndNext.addEventListener('click', () => this.h.nextMission());
+    this.el.btnEndRetry.addEventListener('click', () => this.h.retryMission());
   }
-  if (screen === SCREEN_PAUSED && g) {
-    menus.pauseCash.textContent = `Cash: $${g.player.cash.toLocaleString('en-US')} · Missions complete: ${g.mission.completed.length}/5`;
+
+  showStart(hasSave) {
+    this.el.start.classList.remove('hidden');
+    this.el.pause.classList.add('hidden');
+    this.el.end.classList.add('hidden');
+    this.el.btnContinue.classList.toggle('hidden', !hasSave);
   }
-}
 
-export function showGameOver(menus, title, text) {
-  menus.overTitle.textContent = title;
-  menus.overText.textContent = text;
-  menus.title.style.display = 'none';
-  menus.pause.style.display = 'none';
-  menus.over.style.display = 'flex';
-}
+  hideStart() {
+    this.el.start.classList.add('hidden');
+  }
 
-export function showHelp(menus) {
-  menus.help.style.display = 'flex';
-}
+  showPause() {
+    this.el.pause.classList.remove('hidden');
+  }
 
-export function hideHelp(menus) {
-  menus.help.style.display = 'none';
+  hidePause() {
+    this.el.pause.classList.add('hidden');
+  }
+
+  /** Mission complete: title, outro text, reward, next button. */
+  showEnd({ title, text, nextLabel, showNext, showRetry }) {
+    this.el.endTitle.textContent = title;
+    this.el.endText.textContent = text;
+    this.el.btnEndNext.textContent = nextLabel;
+    this.el.btnEndNext.classList.toggle('hidden', !showNext);
+    this.el.btnEndRetry.classList.toggle('hidden', !showRetry);
+    this.el.end.classList.remove('hidden');
+  }
+
+  hideEnd() {
+    this.el.end.classList.add('hidden');
+  }
 }

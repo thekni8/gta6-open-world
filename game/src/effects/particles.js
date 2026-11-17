@@ -1,107 +1,110 @@
-// Effects — impact sparks, damage smoke, skid marks and screen shake.
-// All cheap Three.js primitives, pooled so the frame rate stays up.
+// Particles and skid marks: one pooled THREE.Points cloud for sparks,
+// smoke and blood, plus fading dark quads the tyres leave behind, and a
+// small explosion helper for destroyed cars.
+
 import * as THREE from 'three';
 
-export function createEffects(scene) {
-  return {
-    scene,
-    particles: [], // {mesh, vel, life, maxLife}
-    skids: [],
-    shake: 0,
-    smokeTimer: 0,
-  };
-}
+const MAX_PARTICLES = 600;
 
-const SPARK_COLORS = [0xffd23e, 0xff7a2a, 0xffffff];
-
-/** Burst of sparks at a point (crashes, bullet hits). */
-export function spawnSparks(fx, x, y, z, count = 10) {
-  for (let i = 0; i < count; i += 1) {
-    const geo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
-    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: SPARK_COLORS[i % SPARK_COLORS.length] }));
-    mesh.position.set(x, y, z);
-    fx.scene.add(mesh);
-    fx.particles.push({
-      mesh,
-      vel: new THREE.Vector3((Math.random() - 0.5) * 10, Math.random() * 7 + 2, (Math.random() - 0.5) * 10),
-      life: 0.5,
-      maxLife: 0.5,
-      gravity: -18,
-      fade: true,
-    });
+export class Particles {
+  constructor(scene) {
+    this.scene = scene;
+    this.items = []; // {pos, vel, life, maxLife, size, color, gravity}
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX_PARTICLES * 3), 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MAX_PARTICLES * 3), 3));
+    const mat = new THREE.PointsMaterial({ size: 0.35, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false });
+    this.points = new THREE.Points(geo, mat);
+    this.points.frustumCulled = false;
+    scene.add(this.points);
+    this.skids = [];
+    this.skidMat = new THREE.MeshBasicMaterial({ color: 0x14161a, transparent: true, opacity: 0.55, depthWrite: false });
   }
-}
 
-/** A puff of grey smoke (damaged cars, exhaust on hard acceleration). */
-export function spawnSmoke(fx, x, y, z) {
-  const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.7, 8, 6),
-    new THREE.MeshBasicMaterial({ color: 0x555555, transparent: true, opacity: 0.5 }),
-  );
-  mesh.position.set(x, y, z);
-  fx.scene.add(mesh);
-  fx.particles.push({
-    mesh,
-    vel: new THREE.Vector3((Math.random() - 0.5) * 1.5, 2.2, (Math.random() - 0.5) * 1.5),
-    life: 1.1,
-    maxLife: 1.1,
-    gravity: 0.5,
-    fade: true,
-    grow: true,
-  });
-}
-
-/** A dark skid quad on the road under a sliding car. */
-export function spawnSkid(fx, x, z, heading) {
-  if (fx.skids.length > 60) {
-    const old = fx.skids.shift();
-    fx.scene.remove(old);
-  }
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.5, 1.6),
-    new THREE.MeshBasicMaterial({ color: 0x14161a, transparent: true, opacity: 0.55 }),
-  );
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.rotation.z = -heading;
-  mesh.position.set(x, 0.25, z);
-  fx.scene.add(mesh);
-  fx.skids.push(mesh);
-}
-
-/** Kick the camera. `amount` 0..1. */
-export function addShake(fx, amount) {
-  fx.shake = Math.min(1, fx.shake + amount);
-}
-
-export function updateEffects(fx, dt, damagedCars) {
-  for (const p of fx.particles) {
-    p.life -= dt;
-    p.vel.y += p.gravity * dt;
-    p.mesh.position.addScaledVector(p.vel, dt);
-    if (p.fade) p.mesh.material.opacity = Math.max(0, p.life / p.maxLife) * 0.6;
-    if (p.grow) p.mesh.scale.setScalar(1 + (1 - p.life / p.maxLife) * 2);
-  }
-  for (let i = fx.particles.length - 1; i >= 0; i -= 1) {
-    if (fx.particles[i].life <= 0) {
-      fx.scene.remove(fx.particles[i].mesh);
-      fx.particles.splice(i, 1);
+  emit(x, y, z, count, color, speed, up, life, gravity = -6) {
+    for (let i = 0; i < count; i++) {
+      if (this.items.length >= MAX_PARTICLES) this.items.shift();
+      const a = Math.random() * Math.PI * 2;
+      const s = speed * (0.4 + Math.random() * 0.8);
+      this.items.push({
+        x, y, z,
+        vx: Math.cos(a) * s,
+        vy: up * (0.5 + Math.random()),
+        vz: Math.sin(a) * s,
+        life: life * (0.6 + Math.random() * 0.6),
+        maxLife: life,
+        r: color.r, g: color.g, b: color.b,
+        gravity,
+      });
     }
   }
-  fx.shake = Math.max(0, fx.shake - dt * 2.2);
-  // Damaged cars trail smoke.
-  fx.smokeTimer -= dt;
-  if (fx.smokeTimer <= 0) {
-    fx.smokeTimer = 0.25;
-    for (const car of damagedCars) {
-      if (car.damage > 0.35 && car.health > 0) {
-        spawnSmoke(fx, car.pos.x, 1.2, car.pos.z);
+
+  spark(x, y, z, count = 8) {
+    this.emit(x, y, z, count, { r: 1, g: 0.85, b: 0.4 }, 5, 3, 0.4, -9);
+  }
+
+  smoke(x, y, z) {
+    this.emit(x, y, z, 2, { r: 0.25, g: 0.25, b: 0.25 }, 0.8, 1.6, 1.4, 1.5);
+  }
+
+  blood(x, y, z) {
+    this.emit(x, y, z, 10, { r: 0.6, g: 0.05, b: 0.05 }, 3, 2, 0.5, -9);
+  }
+
+  explosion(x, y, z) {
+    this.emit(x, y, z, 40, { r: 1, g: 0.5, b: 0.1 }, 9, 6, 0.8, -7);
+    this.emit(x, y, z, 25, { r: 0.2, g: 0.2, b: 0.2 }, 4, 5, 1.6, 1.5);
+  }
+
+  /** A skid quad under a sliding car. */
+  skid(x, z, heading) {
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 1.6), this.skidMat);
+    quad.rotation.x = -Math.PI / 2;
+    quad.rotation.z = -heading;
+    quad.position.set(x, 0.06, z);
+    this.scene.add(quad);
+    this.skids.push({ mesh: quad, life: 9 });
+    if (this.skids.length > 120) {
+      const old = this.skids.shift();
+      this.scene.remove(old.mesh);
+    }
+  }
+
+  update(dt) {
+    // Particles.
+    const posAttr = this.points.geometry.getAttribute('position');
+    const colAttr = this.points.geometry.getAttribute('color');
+    let n = 0;
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const p = this.items[i];
+      p.life -= dt;
+      if (p.life <= 0) {
+        this.items.splice(i, 1);
+        continue;
+      }
+      p.vy += p.gravity * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+      if (p.y < 0.05) { p.y = 0.05; p.vy = 0; }
+      const fade = p.life / p.maxLife;
+      posAttr.setXYZ(n, p.x, p.y, p.z);
+      colAttr.setXYZ(n, p.r * fade, p.g * fade, p.b * fade);
+      n++;
+    }
+    // Hide the unused tail of the buffer.
+    for (let i = n; i < MAX_PARTICLES; i++) posAttr.setXYZ(i, 0, -100, 0);
+    posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
+    // Skid marks fade out.
+    for (let i = this.skids.length - 1; i >= 0; i--) {
+      const s = this.skids[i];
+      s.life -= dt;
+      s.mesh.material.opacity = Math.max(0, 0.55 * (s.life / 9));
+      if (s.life <= 0) {
+        this.scene.remove(s.mesh);
+        this.skids.splice(i, 1);
       }
     }
   }
-}
-
-/** The frame's camera shake offset (added to the camera after lookAt). */
-export function shakeOffset(fx) {
-  const s = fx.shake * fx.shake * 0.5;
-  return new THREE.Vector3((Math.random() - 0.5) * s, (Math.random() - 0.5) * s, 0);
 }

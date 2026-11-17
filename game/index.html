@@ -1,106 +1,83 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Meridian Bay — an open-world crime game</title>
-<style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1420; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #eef1f5; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  #hud { position: fixed; inset: 0; pointer-events: none; display: none; }
-  #hud.on { display: block; }
-  .panel { background: rgba(12, 18, 28, 0.72); border: 1px solid rgba(255,255,255,0.18); border-radius: 10px; padding: 8px 12px; }
-  #hud-topleft { position: absolute; top: 14px; left: 14px; }
-  #health-bar { width: 180px; height: 12px; background: #222; border-radius: 6px; overflow: hidden; margin-top: 4px; }
-  #health-fill { height: 100%; width: 100%; background: #3aa655; }
-  #cash { font-size: 20px; font-weight: 700; color: #7de38a; }
-  #stars { position: absolute; top: 14px; right: 14px; font-size: 26px; letter-spacing: 4px; text-shadow: 0 2px 6px rgba(0,0,0,0.7); }
-  #objective { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); max-width: 46%; text-align: center; font-size: 15px; }
-  #speed { position: absolute; bottom: 16px; right: 16px; font-size: 26px; font-weight: 700; text-shadow: 0 2px 6px rgba(0,0,0,0.7); }
-  #ammo { position: absolute; bottom: 52px; right: 16px; font-size: 15px; text-shadow: 0 2px 6px rgba(0,0,0,0.7); }
-  #message { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); max-width: 60%; text-align: center; font-size: 16px; background: rgba(12,18,28,0.78); border: 1px solid rgba(255,210,62,0.5); border-radius: 10px; padding: 10px 16px; transition: opacity 0.4s; }
-  #hint { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); font-size: 14px; text-shadow: 0 2px 6px rgba(0,0,0,0.8); }
-  #minimap-wrap { position: absolute; bottom: 16px; left: 14px; }
-  #minimap { width: 200px; height: 200px; border-radius: 10px; border: 2px solid rgba(255,255,255,0.35); background: rgba(12,18,28,0.8); }
-  #crosshair { position: absolute; top: 50%; left: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; display: none; }
-  #crosshair::before, #crosshair::after { content: ""; position: absolute; background: #fff; box-shadow: 0 0 4px #000; }
-  #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
-  #crosshair::after { top: 10px; left: 0; height: 2px; width: 22px; }
-  #vignette { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(180,0,0,0.55) 100%); }
-  .menu { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; background: linear-gradient(160deg, rgba(8,20,36,0.88), rgba(20,40,60,0.82)); text-align: center; z-index: 10; }
-  .menu h1 { font-size: 56px; margin: 0 0 4px; letter-spacing: 2px; color: #ffd23e; text-shadow: 0 4px 24px rgba(0,0,0,0.6); }
-  .menu h2 { font-size: 15px; font-weight: 400; color: #bcd6ea; margin: 0 0 26px; max-width: 560px; line-height: 1.5; }
-  .menu button { pointer-events: auto; display: block; margin: 8px auto; min-width: 260px; padding: 13px 20px; font-size: 17px; font-weight: 600; color: #0e1420; background: #ffd23e; border: none; border-radius: 10px; cursor: pointer; }
-  .menu button.secondary { background: rgba(255,255,255,0.14); color: #eef1f5; border: 1px solid rgba(255,255,255,0.3); }
-  .menu button:hover { filter: brightness(1.1); }
-  .menu .keys { margin-top: 22px; font-size: 14px; color: #bcd6ea; line-height: 1.9; }
-  .menu .keys b { color: #fff; }
-  #menu-help { background: rgba(8,16,28,0.94); }
-  #menu-help .keys { text-align: left; }
-</style>
-</head>
-<body>
-<canvas id="game" aria-label="Meridian Bay: an open-world crime game. Drive, explore the city, take missions."></canvas>
-<p id="status" role="status" aria-live="polite"></p>
-<div id="vignette"></div>
-
-<div id="hud">
-  <div id="hud-topleft" class="panel">
-    <div id="cash">$0</div>
-    <div id="health-bar"><div id="health-fill"></div></div>
-    <div id="health-text" style="font-size:12px; color:#bcd6ea;">100</div>
-  </div>
-  <div id="stars">☆☆☆☆☆</div>
-  <div id="objective" class="panel">Press Enter to start the next mission</div>
-  <div id="speed"></div>
-  <div id="ammo"></div>
-  <div id="message"></div>
-  <div id="hint"></div>
-  <div id="minimap-wrap"><canvas id="minimap" width="200" height="200"></canvas></div>
-  <div id="crosshair"></div>
-</div>
-
-<div id="menu-title" class="menu" style="display:flex;">
-  <h1>MERIDIAN BAY</h1>
-  <h2>Kai Mercer, driver-for-hire, caught between the Harbor Kings and the Vesper Syndicate. Steal cars, outrun the law, pick a side — and take the city.</h2>
-  <div id="title-buttons">
-    <button id="btn-new">New Game</button>
-    <button id="btn-continue" class="secondary" style="display:none;">Continue</button>
-    <button id="btn-help" class="secondary">Controls</button>
-  </div>
-  <div class="keys">WASD drive / walk &nbsp;·&nbsp; Mouse drag to orbit camera &nbsp;·&nbsp; E enter / exit car<br>Click shoot / punch &nbsp;·&nbsp; R reload &nbsp;·&nbsp; Shift sprint &nbsp;·&nbsp; Space handbrake &nbsp;·&nbsp; M map &nbsp;·&nbsp; Esc pause</div>
-</div>
-
-<div id="menu-pause" class="menu">
-  <h1>PAUSED</h1>
-  <h2 id="pause-cash"></h2>
-  <button id="btn-resume">Resume</button>
-  <button id="btn-quit" class="secondary">Quit to Title</button>
-  <div class="keys">WASD drive / walk · E enter / exit car · Click shoot / punch · R reload · M map</div>
-</div>
-
-<div id="menu-over" class="menu">
-  <h1 id="over-title">Kai is down</h1>
-  <h2 id="over-text"></h2>
-  <button id="btn-retry">Get Back Up</button>
-</div>
-
-<div id="menu-help" class="menu">
-  <h1>CONTROLS</h1>
-  <div class="keys">
-    <b>W A S D</b> — walk / drive &nbsp;·&nbsp; <b>Shift</b> — sprint on foot<br>
-    <b>Mouse drag</b> — orbit the camera &nbsp;·&nbsp; <b>Click</b> — shoot / punch<br>
-    <b>E</b> — enter / exit a car (stealing one raises your wanted level)<br>
-    <b>Space</b> — handbrake &nbsp;·&nbsp; <b>R</b> — reload &nbsp;·&nbsp; <b>M</b> — big map &nbsp;·&nbsp; <b>Esc</b> — pause<br>
-    <b>Enter</b> — start the next mission &nbsp;·&nbsp; Lay low on the beach to lose the heat faster.
-  </div>
-  <button id="btn-help-close">Close</button>
-</div>
-
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="./style.css">
 <script type="importmap">
 { "imports": { "three": "./vendor/three.min.js" } }
 </script>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div id="vignette"></div>
+  <div id="top-left">
+    <div id="health-bar"><div id="health-fill"></div></div>
+    <div id="health-num">100</div>
+    <div id="cash">$200</div>
+    <div id="stars"></div>
+  </div>
+  <div id="top-right">
+    <canvas id="minimap" width="220" height="220"></canvas>
+    <div id="speed"></div>
+  </div>
+  <div id="objective-bar">
+    <div id="objective">Visit the start marker to begin the next mission.</div>
+    <div id="timer"></div>
+  </div>
+  <div id="message" class="hidden"></div>
+  <div id="crosshair" class="hidden">+</div>
+  <div id="ammo">AMMO 12/12</div>
+  <div id="help-line">WASD move/drive · E enter car · LMB shoot · Q punch · R reload · F lights · M map · Esc pause</div>
+</div>
+
+<!-- Big map overlay -->
+<div id="map-overlay" class="hidden">
+  <canvas id="bigmap" width="640" height="640"></canvas>
+  <p>MERIDIAN BAY — press M to close</p>
+</div>
+
+<!-- Start screen -->
+<div id="menu-start" class="menu">
+  <h1>MERIDIAN BAY</h1>
+  <p class="tagline">A sun-soaked open-world crime story. Drive it. Steal it. Survive it.</p>
+  <p class="story">Kai Mercer, driver-for-hire, is caught between the Harbor Kings and the Vesper Syndicate. Five missions. One bay. Your call.</p>
+  <button id="btn-new" class="big-btn">New Game</button>
+  <button id="btn-continue" class="big-btn hidden">Continue</button>
+  <button id="btn-controls" class="big-btn secondary">Controls</button>
+  <div id="controls-panel" class="hidden">
+    <p><b>WASD</b> move / drive &nbsp;·&nbsp; <b>Mouse</b> orbit camera &nbsp;·&nbsp; <b>Shift</b> sprint</p>
+    <p><b>E</b> enter / exit car &nbsp;·&nbsp; <b>Space</b> handbrake &nbsp;·&nbsp; <b>LMB</b> shoot &nbsp;·&nbsp; <b>Q</b> punch</p>
+    <p><b>R</b> reload &nbsp;·&nbsp; <b>F</b> headlights &nbsp;·&nbsp; <b>M</b> big map &nbsp;·&nbsp; <b>N</b> mute &nbsp;·&nbsp; <b>Esc / P</b> pause</p>
+    <p>Steal cars, lose the cops at the safehouse (green circle on the map), and follow the gold marker.</p>
+  </div>
+  <p class="foot">An original game. No Rockstar / GTA content. Best in desktop Chrome.</p>
+</div>
+
+<!-- Pause menu -->
+<div id="menu-pause" class="menu hidden">
+  <h1>PAUSED</h1>
+  <button id="btn-resume" class="big-btn">Resume</button>
+  <button id="btn-restart" class="big-btn secondary">Restart mission</button>
+  <button id="btn-mute" class="big-btn secondary">Sound: ON</button>
+  <button id="btn-quit" class="big-btn secondary">Save &amp; quit to menu</button>
+</div>
+
+<!-- Mission end screen -->
+<div id="menu-end" class="menu hidden">
+  <h1 id="end-title">Mission Complete</h1>
+  <p id="end-text" class="story"></p>
+  <button id="btn-end-next" class="big-btn">Next mission</button>
+  <button id="btn-end-retry" class="big-btn secondary hidden">Retry mission</button>
+</div>
+
+<div id="fatal" class="hidden"></div>
+
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

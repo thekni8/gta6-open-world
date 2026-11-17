@@ -1,84 +1,82 @@
-// Meridian Bay — the story. Five missions in Kai Mercer's turf war between the
-// Harbor Kings (dockside smugglers) and the Vesper Syndicate (nightclub money).
-// Every name, place and crew is invented for this game.
+// The story of Meridian Bay: Kai Mercer, a driver-for-hire, pulled into a
+// turf war between the Harbor Kings (dockside smugglers) and the Vesper
+// Syndicate (nightclub money). Five missions, all original names and places.
+
 export const STORY = {
-  intro: 'Kai Mercer, driver-for-hire. The Harbor Kings own the docks. The Vesper Syndicate owns the night. Tonight, both want Kai.',
-  outroKings: 'Kai hands the ledger to the Harbor Kings. The docks are his now — and the Syndicate will remember the night he chose.',
-  outroVesper: 'Kai burns the ledger and walks into the Vesper club a made man. The Kings lose the port, and Kai gains a city.',
+  hero: 'Kai Mercer',
+  crews: {
+    harbor: 'Harbor Kings',
+    vesper: 'Vesper Syndicate',
+  },
+  intro:
+    'Meridian Bay. You are Kai Mercer, a driver-for-hire with a fast car and a slow rent. Two crews want you — and tonight, both of them are calling.',
 };
 
-export const MISSION_DEFS = [
+export const MISSIONS = [
   {
-    id: 1,
-    name: 'First Delivery',
-    giver: 'Harbor Kings',
-    intro: 'Mara Voss (Harbor Kings): "One package, no questions. Marina to the downtown tower. Drive like the rent depends on it — it does."',
-    outro: 'Delivered. Mara nods once. "You drive clean. The Kings remember clean."',
+    id: 'delivery',
+    title: 'Mission 1 — First Delivery',
+    intro: 'Rook from the Harbor Kings needs a package at the marina. Drive it there. No questions, no stops.',
+    outro: 'Package delivered. Rook is impressed — and the Kings now know your name.',
+    objective: 'Drive to the marina marker',
     reward: 400,
-    steps: [
-      { text: 'Pick up the package at the marina', place: 'marina', radius: 10 },
-      { text: 'Deliver it to the downtown tower', place: 'downtown', radius: 10 },
-    ],
+    type: 'reach',
+    target: 'marina',
+    timeLimit: 150,
   },
   {
-    id: 2,
-    name: 'Borrowed Wheels',
-    giver: 'Harbor Kings',
-    intro: 'Mara: "The Syndicate took our car. Take it back. The gold coupe by the old-town garage — bring it to our garage. Try not to get noticed."',
-    outro: 'The coupe is home. "Borrowed, returned," Mara grins. "The Kings pay their debts."',
+    id: 'borrowed',
+    title: 'Mission 2 — Borrowed Wheels',
+    intro: 'The Kings need a Vesper courier car — gold paint, downtown. Take it. Bring it to the safehouse garage.',
+    outro: 'The courier car is theirs now. The Vesper Syndicate will remember this.',
+    objective: 'Steal the gold car, then deliver it to the safehouse',
     reward: 600,
-    needsSteal: true,
-    steps: [
-      { text: 'Steal the gold coupe at the old-town garage', place: 'stealSpot', radius: 8, steal: true },
-      { text: 'Deliver the coupe to the Harbor Kings garage', place: 'kingsGarage', radius: 10 },
-    ],
+    type: 'steal-deliver',
+    target: 'downtown',
+    deliverTo: 'safehouse',
+    timeLimit: 240,
   },
   {
-    id: 3,
-    name: 'Hot Pursuit',
-    giver: 'Harbor Kings',
-    intro: 'Mara: "Syndicate tipped the cops. You are the distraction. Lose them — hit all three checkpoints and do not get caught."',
-    outro: 'Sirens fade behind you. "You made the whole precinct look slow," Mara laughs.',
+    id: 'pursuit',
+    title: 'Mission 3 — Hot Pursuit',
+    intro: 'The Meridian Bay PD is on you — three stars and climbing. Lose them. The old park is your hideout.',
+    outro: 'You ghosted the whole department. Word travels fast in this city.',
+    objective: 'Lose the police, then reach the park hideout',
     reward: 900,
+    type: 'escape',
+    target: 'park',
+    timeLimit: 240,
     wantedOnStart: 3,
-    steps: [
-      { text: 'Reach checkpoint 1 — the beachfront', place: 'beachfront', radius: 12 },
-      { text: 'Reach checkpoint 2 — the nightclub', place: 'nightclub', radius: 12 },
-      { text: 'Reach checkpoint 3 — the safehouse', place: 'safehouse', radius: 12 },
-    ],
   },
   {
-    id: 4,
-    name: 'Port Ambush',
-    giver: 'Vesper Syndicate',
-    intro: 'Vesper (Syndicate): "The Kings are moving product through the port tonight. Be there. Make sure none of it leaves."',
-    outro: 'Six shooters down, the port quiet. Vesper: "The Syndicate notices people who finish jobs."',
+    id: 'ambush',
+    title: 'Mission 4 — Port Ambush',
+    intro: 'Vesper gunmen are waiting at the container port. Rook wants them gone. Take them all down.',
+    outro: 'The port is quiet. The Kings own the docks tonight.',
+    objective: 'Eliminate the Vesper gunmen at the port (0/6)',
     reward: 1200,
-    combat: true,
+    type: 'eliminate',
+    target: 'port',
     enemies: 6,
-    steps: [
-      { text: 'Get to the port', place: 'port', radius: 14 },
-      { text: 'Take down the Harbor Kings shooters (0/6)', place: 'port', radius: 30, combat: true },
-    ],
+    timeLimit: 300,
   },
   {
-    id: 5,
-    name: 'Pick a Side',
-    giver: 'Kai Mercer',
-    intro: 'Both crews want the ledger. The Kings wait at the garage. The Syndicate waits at the nightclub. One delivery decides who owns Meridian Bay.',
+    id: 'choice',
+    title: 'Mission 5 — The Choice',
+    intro: 'Both crews meet downtown at midnight. Vesper brought an army. End it — then choose who you drive for.',
     outro: '',
-    reward: 2000,
-    choice: true,
-    steps: [
-      { text: 'Choose: deliver the ledger to the Kings (garage) or the Syndicate (nightclub)', place: 'choice', radius: 12 },
-    ],
+    objective: 'Clear the downtown meeting point (0/8)',
+    reward: 2500,
+    type: 'eliminate-choice',
+    target: 'downtown',
+    enemies: 8,
+    timeLimit: 420,
   },
 ];
 
-/** The objective line shown on the HUD for a mission step. */
-export function stepText(def, stepIndex, kills = 0) {
-  const step = def.steps[stepIndex];
-  if (!step) return 'Mission complete';
-  if (step.combat) return `Take down the Harbor Kings shooters (${kills}/${def.enemies})`;
-  return step.text;
-}
+export const ENDINGS = {
+  harbor:
+    'You drive for the Harbor Kings. The docks, the boats, the whole bay — yours to run. Meridian Bay is yours, Kai.',
+  vesper:
+    'You drive for the Vesper Syndicate. Neon nights, club money, and a city that never sleeps. Meridian Bay is yours, Kai.',
+};

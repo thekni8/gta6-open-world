@@ -1,104 +1,131 @@
-// Kai Mercer on foot — movement, simple walk animation, health and the
-// low-poly character mesh (jacket, head, legs that swing as he walks).
+// Kai Mercer on foot: a low-poly figure (capsule body, head, swinging
+// limbs) with arcade movement — WASD relative to the camera, Shift to
+// sprint, health, and a simple walk-cycle animation.
+
 import * as THREE from 'three';
-import { PLAYER } from '../config.js';
-import { clamp, moveToward } from '../util/random.js';
-import { resolveCircle } from '../world/city.js';
+import { CONFIG } from '../config.js';
+import { clamp } from '../util/random.js';
 
-export function createCharacter(scene) {
-  const group = new THREE.Group();
-  const jacket = new THREE.MeshLambertMaterial({ color: 0x2e6fc2 });
-  const skin = new THREE.MeshLambertMaterial({ color: 0xd9a077 });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x2a2f38 });
+export class Character {
+  constructor(scene) {
+    this.group = new THREE.Group();
+    this.health = CONFIG.player.health;
+    this.heading = 0; // radians, 0 = facing -Z... facing +Z? see update
+    this.speed = 0;
+    this.walkPhase = 0;
+    this.alive = true;
+    this.pos = new THREE.Vector3(30, 0, 210);
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.1, 0.5), jacket);
-  body.position.y = 1.15;
-  body.castShadow = true;
-  group.add(body);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.55), skin);
-  head.position.y = 1.95;
-  head.castShadow = true;
-  group.add(head);
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.18, 0.6), new THREE.MeshLambertMaterial({ color: 0xc23b2e }));
-  cap.position.y = 2.26;
-  group.add(cap);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.8, 0.36), pants);
-  legL.position.set(-0.22, 0.4, 0);
-  legL.castShadow = true;
-  group.add(legL);
-  const legR = legL.clone();
-  legR.position.x = 0.22;
-  group.add(legR);
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.9, 0.3), jacket);
-  armL.position.set(-0.6, 1.15, 0);
-  group.add(armL);
-  const armR = armL.clone();
-  armR.position.x = 0.6;
-  group.add(armR);
-  scene.add(group);
+    const skin = new THREE.MeshLambertMaterial({ color: 0xc98d64 });
+    const jacket = new THREE.MeshLambertMaterial({ color: 0x2e6f8e });
+    const jeans = new THREE.MeshLambertMaterial({ color: 0x2a3550 });
+    const hair = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
 
-  const state = {
-    group,
-    pos: new THREE.Vector3(0, 0, 120),
-    heading: 0,
-    speed: 0,
-    health: PLAYER.maxHealth,
-    walkPhase: 0,
-    legL,
-    legR,
-    armL,
-    armR,
-  };
-  group.position.copy(state.pos);
-  return state;
-}
+    // Torso
+    this.torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.85, 0.4), jacket);
+    this.torso.position.y = 1.25;
+    this.torso.castShadow = true;
+    this.group.add(this.torso);
+    // Head
+    this.head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), skin);
+    this.head.position.y = 1.92;
+    this.head.castShadow = true;
+    this.group.add(this.head);
+    const hairTop = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.14, 0.44), hair);
+    hairTop.position.y = 2.16;
+    this.group.add(hairTop);
+    // Arms (pivot at the shoulder)
+    this.armL = new THREE.Group();
+    this.armL.position.set(-0.45, 1.6, 0);
+    const armLMesh = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.75, 0.22), jacket);
+    armLMesh.position.y = -0.35;
+    armLMesh.castShadow = true;
+    this.armL.add(armLMesh);
+    this.group.add(this.armL);
+    this.armR = new THREE.Group();
+    this.armR.position.set(0.45, 1.6, 0);
+    const armRMesh = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.75, 0.22), jacket);
+    armRMesh.position.y = -0.35;
+    armRMesh.castShadow = true;
+    this.armR.add(armRMesh);
+    this.group.add(this.armR);
+    // Legs (pivot at the hip)
+    this.legL = new THREE.Group();
+    this.legL.position.set(-0.18, 0.85, 0);
+    const legLMesh = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.85, 0.26), jeans);
+    legLMesh.position.y = -0.42;
+    legLMesh.castShadow = true;
+    this.legL.add(legLMesh);
+    this.group.add(this.legL);
+    this.legR = new THREE.Group();
+    this.legR.position.set(0.18, 0.85, 0);
+    const legRMesh = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.85, 0.26), jeans);
+    legRMesh.position.y = -0.42;
+    legRMesh.castShadow = true;
+    this.legR.add(legRMesh);
+    this.group.add(this.legR);
 
-/**
- * Move Kai on foot. `move` is {x, z} in world space (camera-relative input),
- * already normalised; returns nothing, updates the mesh in place.
- */
-export function updateCharacter(player, move, sprint, dt, colliders, cars) {
-  const targetSpeed = move.x === 0 && move.z === 0 ? 0 : sprint ? PLAYER.sprintSpeed : PLAYER.walkSpeed;
-  player.speed = moveToward(player.speed, targetSpeed, 30 * dt);
-  if (player.speed > 0.1) {
-    const len = Math.hypot(move.x, move.z) || 1;
-    const mx = (move.x / len) * player.speed * dt;
-    const mz = (move.z / len) * player.speed * dt;
-    player.pos.x += mx;
-    player.pos.z += mz;
-    player.heading = Math.atan2(mx, mz);
-    player.walkPhase += dt * player.speed * 1.6;
-    const swing = Math.sin(player.walkPhase) * 0.6;
-    player.legL.rotation.x = swing;
-    player.legR.rotation.x = -swing;
-    player.armL.rotation.x = -swing * 0.8;
-    player.armR.rotation.x = swing * 0.8;
-  } else {
-    player.legL.rotation.x *= 0.8;
-    player.legR.rotation.x *= 0.8;
-    player.armL.rotation.x *= 0.8;
-    player.armR.rotation.x *= 0.8;
+    this.group.position.copy(this.pos);
+    scene.add(this.group);
   }
-  player.pos.x = clamp(player.pos.x, -280, 340);
-  player.pos.z = clamp(player.pos.z, -280, 280);
-  resolveCircle(player.pos, PLAYER.radius, colliders);
-  // Soft push-out from parked and driven cars.
-  for (const car of cars) {
-    const dx = player.pos.x - car.pos.x;
-    const dz = player.pos.z - car.pos.z;
-    const d = Math.hypot(dx, dz);
-    const min = 1.9;
-    if (d < min && d > 0.001) {
-      player.pos.x = car.pos.x + (dx / d) * min;
-      player.pos.z = car.pos.z + (dz / d) * min;
+
+  /** Move on foot. axis = {x: strafe, y: forward} in camera space. */
+  update(dt, axis, camYaw, sprinting, city) {
+    if (!this.alive) return;
+    const targetSpeed = axis.y !== 0 || axis.x !== 0
+      ? (sprinting ? CONFIG.player.runSpeed : CONFIG.player.walkSpeed)
+      : 0;
+    this.speed += (targetSpeed - this.speed) * Math.min(1, dt * 10);
+    if (this.speed > 0.1) {
+      // Camera-relative direction: camera yaw 0 looks toward -Z.
+      const sin = Math.sin(camYaw);
+      const cos = Math.cos(camYaw);
+      const dx = -sin * axis.y + cos * axis.x;
+      const dz = -cos * axis.y - sin * axis.x;
+      const len = Math.hypot(dx, dz) || 1;
+      this.pos.x += (dx / len) * this.speed * dt;
+      this.pos.z += (dz / len) * this.speed * dt;
+      this.heading = Math.atan2(dx, dz);
+      city.collideCircle(this.pos, CONFIG.player.radius);
+      this.walkPhase += dt * this.speed * 1.6;
     }
+    // Walk cycle: legs and arms swing in opposition, torso bobs.
+    const swing = Math.min(1, this.speed / CONFIG.player.walkSpeed) * 0.6;
+    const s = Math.sin(this.walkPhase);
+    this.legL.rotation.x = s * swing;
+    this.legR.rotation.x = -s * swing;
+    this.armL.rotation.x = -s * swing * 0.8;
+    this.armR.rotation.x = s * swing * 0.8;
+    this.torso.position.y = 1.25 + Math.abs(Math.cos(this.walkPhase)) * 0.05 * Math.min(1, this.speed / 4);
+    this.group.position.copy(this.pos);
+    this.group.rotation.y = this.heading;
   }
-  player.group.position.copy(player.pos);
-  player.group.rotation.y = player.heading;
-}
 
-/** Deal damage to Kai; returns true when he goes down. */
-export function hurtPlayer(player, amount) {
-  player.health = Math.max(0, player.health - amount);
-  return player.health <= 0;
+  damage(amount) {
+    if (!this.alive) return false;
+    this.health = Math.max(0, this.health - amount);
+    if (this.health <= 0) {
+      this.alive = false;
+      this.group.rotation.x = -Math.PI / 2; // fall flat
+      this.group.position.y = 0.4;
+      return true;
+    }
+    return false;
+  }
+
+  heal(amount) {
+    this.health = Math.min(CONFIG.player.health, this.health + amount);
+  }
+
+  respawn(x, z) {
+    this.pos.set(x, 0, z);
+    this.health = CONFIG.player.health;
+    this.alive = true;
+    this.group.rotation.x = 0;
+    this.group.position.copy(this.pos);
+  }
+
+  setVisible(v) {
+    this.group.visible = v;
+  }
 }

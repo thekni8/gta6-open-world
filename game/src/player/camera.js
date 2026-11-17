@@ -1,71 +1,90 @@
-// Third-person follow camera. Orbits with the mouse drag, pulls in instead of
-// clipping through buildings, and swings behind the car while driving.
+// Third-person follow camera: orbits with the mouse, trails behind the
+// player or their car, and pulls in when a building would block the view.
+
 import * as THREE from 'three';
 import { clamp } from '../util/random.js';
 
-export function createCamera(camera) {
-  return {
-    camera,
-    yaw: 0,
-    pitch: 0.32,
-    distance: 11,
-    currentPos: new THREE.Vector3(0, 8, 130),
-  };
-}
-
-/**
- * Follow `target` (a Vector3) at `heading` when driving. `dragDX` orbits the
- * camera; the camera eases toward its ideal spot and shortens when a building
- * stands between it and the target.
- */
-export function updateCamera(cam, target, heading, driving, dragDX, dt, colliders) {
-  cam.yaw -= dragDX * 0.004;
-  if (driving) {
-    // Ease the orbit back behind the car while driving.
-    let diff = heading + Math.PI - cam.yaw;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    cam.yaw += diff * Math.min(1, dt * 1.5);
+export class FollowCamera {
+  constructor(camera) {
+    this.camera = camera;
+    this.yaw = 0; // 0 = looking toward -Z from behind the player
+    this.pitch = 0.32;
+    this.distance = 9;
+    this.target = new THREE.Vector3();
+    this.shake = 0;
   }
-  const dist = driving ? 13 : 10;
-  const height = driving ? 5.5 : 4.5;
-  const pitch = driving ? 0.22 : cam.pitch;
-  const ideal = new THREE.Vector3(
-    target.x - Math.sin(cam.yaw) * Math.cos(pitch) * dist,
-    target.y + height + Math.sin(pitch) * dist * 0.5,
-    target.z - Math.cos(cam.yaw) * Math.cos(pitch) * dist,
-  );
-  // Pull in rather than clip: shorten the ray until it clears the buildings.
-  let best = 1;
-  for (const c of colliders) {
-    // Cheap segment-vs-AABB test on the XZ line, sampled.
-    for (let t = 0.2; t < 1; t += 0.2) {
-      const x = target.x + (ideal.x - target.x) * t;
-      const z = target.z + (ideal.z - target.z) * t;
-      if (x > c.minX && x < c.maxX && z > c.minZ && z < c.maxZ) {
-        best = Math.min(best, Math.max(0.25, t - 0.15));
-        break;
-      }
+
+  orbit(dx, dy) {
+    this.yaw -= dx * 0.0032;
+    this.pitch = clamp(this.pitch + dy * 0.0028, -0.15, 1.1);
+  }
+
+  addShake(amount) {
+    this.shake = Math.min(0.9, this.shake + amount);
+  }
+
+  /** Follow `pos` (player or car) with heading `heading` for the default view.
+   *  On foot the camera looks at a point well ahead of the player, so the
+   *  crosshair ray runs near chest height instead of diving into the ground
+   *  a few metres past the player (which made shooting useless). */
+  update(dt, pos, heading, city, driving) {
+    // When the player turns on foot, the camera stays where the mouse put
+    // it; when driving, it eases behind the car's heading.
+    if (driving) {
+      const behind = heading + Math.PI;
+      let d = behind - this.yaw;
+      d = ((d + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+      this.yaw += d * Math.min(1, dt * 1.6);
     }
+    const dist = driving ? 12 : 8;
+    this.distance += (dist - this.distance) * Math.min(1, dt * 3);
+    // Low on-foot camera: just above the shoulder line, so the aim ray
+    // stays near chest height out to 40 m.
+    const height = driving ? 4.6 : 1.3 + Math.sin(this.pitch) * this.distance * 0.5;
+    const cx = pos.x + Math.sin(this.yaw) * Math.cos(this.pitch) * this.distance;
+    const cz = pos.z + Math.cos(this.yaw) * Math.cos(this.pitch) * this.distance;
+    const cy = pos.y + height + (driving ? Math.sin(this.pitch) * this.distance : 0);
+
+    // Pull the camera in if a building sits between it and the player.
+    let finalDist = this.distance;
+    const steps = 10;
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const sx = pos.x + (cx - pos.x) * t;
+      const sz = pos.z + (cz - pos.z) * t;
+      const sy = pos.y + 1.6 + (cy - (pos.y + 1.6)) * t;
+      for (const b of city.buildings) {
+        if (sx > b.minX && sx < b.maxX && sz > b.minZ && sz < b.maxZ && sy < b.h) {
+          finalDist = this.distance * (t - 0.12);
+          break;
+        }
+      }
+      if (finalDist < this.distance) break;
+    }
+    finalDist = Math.max(2.5, finalDist);
+    const fx = pos.x + Math.sin(this.yaw) * Math.cos(this.pitch) * finalDist;
+    const fz = pos.z + Math.cos(this.yaw) * Math.cos(this.pitch) * finalDist;
+    const fy = pos.y + height + (driving ? Math.sin(this.pitch) * finalDist : 0);
+    // Over-the-shoulder: shift camera and aim point right on foot, so Kai
+    // sits left of the crosshair instead of under it.
+    const shoulder = driving ? 0 : 1.4;
+    const rx = Math.cos(this.yaw) * shoulder;
+    const rz = -Math.sin(this.yaw) * shoulder;
+
+    this.shake = Math.max(0, this.shake - dt * 2.2);
+    const sh = this.shake * this.shake;
+    const shx = (Math.random() - 0.5) * sh * 0.7;
+    const shy = (Math.random() - 0.5) * sh * 0.7;
+
+    this.camera.position.set(fx + rx + shx, fy + shy, fz + rz);
+    if (driving) {
+      this.target.set(pos.x, pos.y + 1.7, pos.z);
+    } else {
+      // Aim point far ahead at chest height: the crosshair ray is honest.
+      const ax = -Math.sin(this.yaw);
+      const az = -Math.cos(this.yaw);
+      this.target.set(pos.x + ax * 18 + rx, pos.y + 1.5, pos.z + az * 18 + rz);
+    }
+    this.camera.lookAt(this.target);
   }
-  const finalPos = new THREE.Vector3().lerpVectors(target, ideal, best);
-  finalPos.y = Math.max(finalPos.y, 1.2);
-  cam.currentPos.lerp(finalPos, Math.min(1, dt * 8));
-  cam.camera.position.copy(cam.currentPos);
-  cam.camera.lookAt(target.x, target.y + 1.6, target.z);
-  cam.distance = dist;
 }
-
-/** Snap the camera behind the player (used after teleports and shot staging). */
-export function snapCamera(cam, target, heading) {
-  cam.yaw = heading + Math.PI;
-  cam.currentPos.set(
-    target.x - Math.sin(cam.yaw) * 10,
-    target.y + 5,
-    target.z - Math.cos(cam.yaw) * 10,
-  );
-  cam.camera.position.copy(cam.currentPos);
-  cam.camera.lookAt(target.x, target.y + 1.6, target.z);
-}
-
-export { clamp };

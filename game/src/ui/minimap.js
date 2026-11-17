@@ -1,99 +1,99 @@
-// Minimap — a live top-down canvas: roads, the sea, the player arrow, cars,
-// police blinkers, pedestrians and the gold mission marker.
-import { CITY } from '../config.js';
+// Live minimap: a 2D canvas top-down view of Meridian Bay — roads, the
+// sea, the player arrow, traffic dots, flashing police dots, and the
+// mission marker. M toggles a large overlay map.
 
-export function createMinimap(canvas) {
-  return {
-    canvas,
-    ctx: canvas.getContext('2d'),
-    size: canvas.width,
-    big: false,
-  };
-}
+import { CONFIG } from '../config.js';
 
-function toMap(minimap, x, z) {
-  const span = 700; // world units across the map
-  const s = minimap.size / span;
-  return [(x + span / 2) * s, (z + span / 2) * s];
-}
-
-export function drawMinimap(minimap, g) {
-  const { ctx, size } = minimap;
-  const s = size / 700;
-  ctx.clearRect(0, 0, size, size);
-  // Backing.
-  ctx.fillStyle = 'rgba(20, 28, 38, 0.85)';
-  ctx.fillRect(0, 0, size, size);
-  // Sea (east) and sand.
-  ctx.fillStyle = '#1f7f8f';
-  ctx.fillRect((CITY.waterX + 350) * s, 0, size, size);
-  ctx.fillStyle = '#e8d29a';
-  ctx.fillRect((CITY.beachX + 350) * s, 0, (CITY.waterX - CITY.beachX) * s, size);
-  // Roads.
-  ctx.fillStyle = '#6a7078';
-  for (const c of g.city.roadCenters) {
-    ctx.fillRect((c - 7 + 350) * s, 0, 14 * s, size);
-    ctx.fillRect(0, (c - 7 + 350) * s, size, 14 * s);
+export class Minimap {
+  constructor(canvas, city) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.city = city;
+    this.size = canvas.width;
+    this.half = 330; // world units shown from centre to edge
   }
-  // Blocks.
-  ctx.fillStyle = '#3d4654';
-  for (const b of g.city.blockCenters) {
-    for (const b2 of g.city.blockCenters) {
-      ctx.fillRect((b - 30 + 350) * s, (b2 - 30 + 350) * s, 60 * s, 60 * s);
+
+  worldToMap(x, z) {
+    const s = this.size / (this.half * 2);
+    return [this.size / 2 + x * s, this.size / 2 + z * s];
+  }
+
+  /** Draw one frame from the live game state. */
+  draw(s) {
+    const g = this.ctx;
+    const size = this.size;
+    g.clearRect(0, 0, size, size);
+    // Sea + land.
+    g.fillStyle = '#1f6f7c';
+    g.fillRect(0, 0, size, size);
+    g.fillStyle = '#5d7a4a';
+    const [bx] = this.worldToMap(-262, 0);
+    g.fillRect(bx, 0, size - bx, size);
+    // Roads.
+    g.strokeStyle = '#3a3f46';
+    g.lineWidth = 5;
+    for (const c of this.city.roadCoords) {
+      const [x] = this.worldToMap(c, 0);
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, size); g.stroke();
+      const [, z] = this.worldToMap(0, c);
+      g.beginPath(); g.moveTo(0, z); g.lineTo(size, z); g.stroke();
     }
+    // Safehouse zone.
+    const sh = this.city.landmarks.safehouse;
+    const [shx, shy] = this.worldToMap(sh.x, sh.z);
+    g.fillStyle = 'rgba(80,200,120,0.5)';
+    g.beginPath(); g.arc(shx, shy, 7, 0, Math.PI * 2); g.fill();
+    // Mission marker (pulsing gold diamond).
+    if (s.marker) {
+      const [mx, my] = this.worldToMap(s.marker.x, s.marker.z);
+      const pulse = 6 + Math.sin(performance.now() / 200) * 2;
+      g.fillStyle = '#ffd23f';
+      g.beginPath();
+      g.moveTo(mx, my - pulse); g.lineTo(mx + pulse, my); g.lineTo(mx, my + pulse); g.lineTo(mx - pulse, my);
+      g.closePath(); g.fill();
+      g.strokeStyle = '#7a5a00';
+      g.lineWidth = 1.5;
+      g.stroke();
+    }
+    // Choice markers (Harbor gold, Vesper purple).
+    if (s.choiceMarkers) {
+      for (const [key, color] of [['harbor', '#ffd23f'], ['vesper', '#b45fd9']]) {
+        const m = s.choiceMarkers[key];
+        const [mx, my] = this.worldToMap(m.x, m.z);
+        g.fillStyle = color;
+        g.beginPath(); g.arc(mx, my, 6, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = '#111';
+        g.stroke();
+      }
+    }
+    // Traffic dots.
+    g.fillStyle = '#e8e8e8';
+    for (const c of s.traffic) {
+      const [tx, ty] = this.worldToMap(c.x, c.z);
+      g.fillRect(tx - 1.5, ty - 1.5, 3, 3);
+    }
+    // Police dots, flashing red/blue.
+    const flashRed = Math.floor(performance.now() / 250) % 2 === 0;
+    g.fillStyle = flashRed ? '#ff3030' : '#3060ff';
+    for (const c of s.police) {
+      const [px, py] = this.worldToMap(c.x, c.z);
+      g.beginPath(); g.arc(px, py, 3, 0, Math.PI * 2); g.fill();
+    }
+    // Player arrow.
+    const [px, py] = this.worldToMap(s.player.x, s.player.z);
+    g.save();
+    g.translate(px, py);
+    g.rotate(s.playerHeading);
+    g.fillStyle = '#ffffff';
+    g.strokeStyle = '#111';
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(0, -7); g.lineTo(5, 6); g.lineTo(0, 3); g.lineTo(-5, 6);
+    g.closePath(); g.fill(); g.stroke();
+    g.restore();
+    // North tick.
+    g.fillStyle = '#ffffff';
+    g.font = 'bold 11px sans-serif';
+    g.fillText('N', size - 14, 14);
   }
-  // Mission marker (pulsing gold diamond).
-  const target = g.missionTarget;
-  if (target) {
-    const [mx, mz] = toMap(minimap, target.x, target.z);
-    const pulse = 6 + Math.sin(performance.now() * 0.006) * 2;
-    ctx.fillStyle = '#ffd23e';
-    ctx.beginPath();
-    ctx.moveTo(mx, mz - pulse);
-    ctx.lineTo(mx + pulse, mz);
-    ctx.lineTo(mx, mz + pulse);
-    ctx.lineTo(mx - pulse, mz);
-    ctx.closePath();
-    ctx.fill();
-  }
-  // Pedestrians (tiny white dots).
-  ctx.fillStyle = '#ffffff';
-  for (const ped of g.peds) {
-    if (ped.dead) continue;
-    const [px, pz] = toMap(minimap, ped.pos.x, ped.pos.z);
-    ctx.fillRect(px - 1, pz - 1, 2, 2);
-  }
-  // Traffic (grey squares) and the player's car (green).
-  ctx.fillStyle = '#c8ccd2';
-  for (const car of g.traffic) {
-    if (car.health <= 0) continue;
-    const [cx, cz] = toMap(minimap, car.pos.x, car.pos.z);
-    ctx.fillRect(cx - 2, cz - 2, 4, 4);
-  }
-  // Police (flashing red/blue).
-  const blink = Math.sin(performance.now() * 0.012) > 0;
-  ctx.fillStyle = blink ? '#ff2222' : '#2266ff';
-  for (const cop of g.police) {
-    const [cx, cz] = toMap(minimap, cop.pos.x, cop.pos.z);
-    ctx.beginPath();
-    ctx.arc(cx, cz, 4, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // Player arrow (rotates with heading).
-  const [px, pz] = toMap(minimap, g.player.pos.x, g.player.pos.z);
-  ctx.save();
-  ctx.translate(px, pz);
-  ctx.rotate(g.inCar ? g.playerCar.heading : g.player.heading);
-  ctx.fillStyle = '#3aa655';
-  ctx.beginPath();
-  ctx.moveTo(0, -7);
-  ctx.lineTo(5, 6);
-  ctx.lineTo(-5, 6);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-  // Border.
-  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(1, 1, size - 2, size - 2);
 }

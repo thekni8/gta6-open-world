@@ -1,133 +1,257 @@
-// Combat — fists up close, a pistol at range. Hitscan shots from the camera
-// centre, tracer feedback, enemy health and the wanted heat a gunshot brings.
+// Combat: a pistol with a magazine and reload, a melee swing, tracer
+// lines and hit feedback — plus the gunmen the missions throw at the
+// player, who take cover-less pot-shots back.
+
 import * as THREE from 'three';
-import { PLAYER, WANTED } from '../config.js';
-import { addWanted } from '../police/wanted.js';
-import { scarePedestrians } from '../people/pedestrians.js';
+import { CONFIG } from '../config.js';
+import { range, pick, clamp } from '../util/random.js';
 
-export function createCombat() {
-  return {
-    ammo: PLAYER.pistolAmmo,
-    reserve: PLAYER.pistolReserve,
-    cooldown: 0,
-    reloadTimer: 0,
-    meleeCooldown: 0,
-    tracers: [], // {mesh, life} lines that fade out
-    shotsFired: 0, // debug counter: pistol rounds actually discharged
-  };
-}
-
-/** Reload the pistol from the reserve. */
-export function reloadWeapon(combat) {
-  if (combat.reloadTimer > 0 || combat.ammo === PLAYER.pistolAmmo || combat.reserve <= 0) return;
-  combat.reloadTimer = 1.1;
-}
-
-export function updateCombatTimers(combat, dt) {
-  combat.cooldown = Math.max(0, combat.cooldown - dt);
-  combat.meleeCooldown = Math.max(0, combat.meleeCooldown - dt);
-  if (combat.reloadTimer > 0) {
-    combat.reloadTimer -= dt;
-    if (combat.reloadTimer <= 0) {
-      const need = PLAYER.pistolAmmo - combat.ammo;
-      const take = Math.min(need, combat.reserve);
-      combat.ammo += take;
-      combat.reserve -= take;
-    }
+export class Weapons {
+  constructor(scene, camera, rng) {
+    this.scene = scene;
+    this.camera = camera;
+    this.rng = rng;
+    this.ammo = CONFIG.combat.magazine;
+    this.reloading = false;
+    this.reloadTimer = 0;
+    this.cooldown = 0;
+    this.raycaster = new THREE.Raycaster();
+    this.tracerMat = new THREE.LineBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.9 });
+    this.onShot = null; // () => {} — sound + scare peds
+    this.onHit = null; // (kind, target) => {} — wanted, mission kills
   }
-  for (const t of combat.tracers) t.life -= dt;
-  combat.tracers = combat.tracers.filter((t) => t.life > 0);
-}
 
-/**
- * Fire the pistol from the camera toward the crosshair. `targets` are
- * {pos, health, radius, onHit} — pedestrians, shooters, police. Returns the
- * hit target or null. Fires a tracer and a bang through `fx`.
- */
-export function shootPistol(combat, scene, camera, targets, fx, wanted, peds) {
-  if (combat.cooldown > 0 || combat.reloadTimer > 0) return null;
-  if (combat.ammo <= 0) {
-    reloadWeapon(combat);
+  /** Fire the pistol from the camera centre. Returns what was hit, if anything.
+   *  Two-step aim: the camera ray through the crosshair finds the aim point
+   *  (what the player sees), then the shot travels from Kai's chest to that
+   *  point — so the bullet goes where the crosshair points, at chest height,
+   *  instead of diving into the ground a few metres ahead. */
+  shoot(ctx) {
+    if (this.cooldown > 0 || this.reloading) return null;
+    if (this.ammo <= 0) {
+      this.reload();
+      return null;
+    }
+    this.cooldown = CONFIG.combat.fireInterval;
+    this.ammo -= 1;
+    this.onShot?.();
+    const origin = this.camera.position.clone();
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    // Step 1: where does the crosshair point?
+    this.raycaster.set(origin, dir);
+    this.raycaster.far = CONFIG.combat.pistolRange;
+    const worldTargets = [];
+    for (const e of ctx.enemies.list) worldTargets.push(e.mesh);
+    for (const p of ctx.peds.peds) if (p.state !== 'down') worldTargets.push(p.mesh);
+    for (const c of ctx.traffic.cars) worldTargets.push(c.group);
+    for (const c of ctx.police.cars) worldTargets.push(c.group);
+    worldTargets.push(ctx.city.group);
+    const worldHits = this.raycaster.intersectObjects(worldTargets, true);
+    const aimPoint = worldHits.length > 0
+      ? worldHits[0].point.clone()
+      : origin.clone().addScaledVector(dir, CONFIG.combat.pistolRange);
+    // Step 2: the shot, from Kai's chest to the aim point.
+    const pp = ctx.playerPos();
+    const muzzle = new THREE.Vector3(pp.x, pp.y + 1.4, pp.z);
+    const shotDir = aimPoint.clone().sub(muzzle);
+    const shotLen = shotDir.length();
+    if (shotLen < 0.5) return null;
+    shotDir.normalize();
+    this.raycaster.set(muzzle, shotDir);
+    this.raycaster.far = Math.min(shotLen, CONFIG.combat.pistolRange);
+    const liveTargets = worldTargets.slice(0, -1); // everything but the city
+    const hits = this.raycaster.intersectObjects(liveTargets, true);
+    let end = aimPoint.clone();
+    let hit = null;
+    if (hits.length > 0) {
+      const h = hits[0];
+      end = h.point.clone();
+      hit = this.identifyHit(h.object, ctx);
+      if (hit) this.applyHit(hit, ctx, h.point);
+    }
+    this.showTracer(muzzle, end);
+    ctx.particles.spark(end.x, end.y, end.z, 6);
+    return hit;
+  }
+
+  identifyHit(object, ctx) {
+    let o = object;
+    while (o) {
+      if (o.userData.enemy) return { kind: 'enemy', enemy: o.userData.enemy };
+      if (o.userData.ped) return { kind: 'ped', ped: o.userData.ped };
+      if (o.userData.car) return { kind: 'car', car: o.userData.car };
+      o = o.parent;
+    }
     return null;
   }
-  combat.ammo -= 1;
-  combat.cooldown = 0.28;
-  combat.shotsFired += 1;
-  const origin = camera.position.clone();
-  const dir = new THREE.Vector3();
-  camera.getWorldDirection(dir);
-  const end = origin.clone().addScaledVector(dir, 60);
-  let best = null;
-  let bestT = Infinity;
-  for (const t of targets) {
-    if (t.dead || t.health <= 0) continue;
-    const to = new THREE.Vector3(t.pos.x - origin.x, (t.pos.y ?? 1) - origin.y, t.pos.z - origin.z);
-    const along = to.dot(dir);
-    if (along < 0 || along > 60) continue;
-    const closest = origin.clone().addScaledVector(dir, along);
-    const d = Math.hypot(closest.x - t.pos.x, closest.y - (t.pos.y ?? 1), closest.z - t.pos.z);
-    if (d < (t.radius ?? 1.2) + 0.6 && along < bestT) {
-      bestT = along;
-      best = t;
-    }
-  }
-  const hitPoint = best ? new THREE.Vector3(best.pos.x, best.pos.y ?? 1, best.pos.z) : end;
-  const tracerGeo = new THREE.BufferGeometry().setFromPoints([origin, hitPoint]);
-  const tracer = new THREE.Line(tracerGeo, new THREE.LineBasicMaterial({ color: 0xffe94a }));
-  scene.add(tracer);
-  combat.tracers.push({ mesh: tracer, life: 0.12 });
-  if (fx) fx.gunshot();
-  if (best) {
-    best.health -= PLAYER.pistolDamage;
-    if (fx) fx.hitMarker();
-    if (best.health <= 0) {
-      best.dead = true;
-      if (best.isCop) addWanted(wanted, WANTED.killCop, 'killed a cop');
-      else if (best.isPed) addWanted(wanted, WANTED.killPed, 'killed a pedestrian');
-      if (best.mesh) best.mesh.visible = false;
-    }
-  } else if (wanted) {
-    addWanted(wanted, 0, 'shot fired');
-    if (wanted.stars === 0) wanted.stars = 1; // firing a gun in public draws heat
-  }
-  if (peds) scarePedestrians(peds, origin.x, origin.z, 30);
-  return best;
-}
 
-/** Punch: short range, no ammo, no noise — but a witness still calls it in. */
-export function punch(combat, playerPos, heading, targets, wanted) {
-  if (combat.meleeCooldown > 0) return null;
-  combat.meleeCooldown = 0.45;
-  const fx = Math.sin(heading);
-  const fz = Math.cos(heading);
-  for (const t of targets) {
-    if (t.dead || t.health <= 0) continue;
-    const dx = t.pos.x - playerPos.x;
-    const dz = t.pos.z - playerPos.z;
-    const d = Math.hypot(dx, dz);
-    const facing = (dx * fx + dz * fz) / Math.max(d, 0.001);
-    if (d < PLAYER.punchRange && facing > 0.3) {
-      t.health -= PLAYER.punchDamage;
-      if (t.health <= 0) {
-        t.dead = true;
-        if (t.isCop) addWanted(wanted, WANTED.killCop, 'killed a cop');
-        else if (t.isPed) addWanted(wanted, WANTED.hitPed, 'beat a pedestrian');
-        if (t.mesh) t.mesh.visible = false;
-      } else if (t.isPed) {
-        t.panic = 1;
-        t.fleeing = true;
-        t.fleeTimer = 3;
+  applyHit(hit, ctx, point) {
+    if (hit.kind === 'enemy') {
+      const dead = hit.enemy.damage(CONFIG.combat.pistolDamage);
+      ctx.particles.blood(point.x, point.y, point.z);
+      if (dead) {
+        ctx.enemies.remove(hit.enemy);
+        this.onHit?.('enemy', hit.enemy);
       }
-      return t;
+    } else if (hit.kind === 'ped') {
+      ctx.peds.knockDown(hit.ped);
+      this.onHit?.('ped', hit.ped);
+    } else if (hit.kind === 'car') {
+      const destroyed = hit.car.damage(CONFIG.combat.pistolDamage);
+      if (destroyed) ctx.particles.explosion(hit.car.pos.x, 1, hit.car.pos.z);
+      this.onHit?.('car', hit.car);
     }
   }
-  return null;
+
+  showTracer(from, to) {
+    const geo = new THREE.BufferGeometry().setFromPoints([from, to]);
+    const line = new THREE.Line(geo, this.tracerMat);
+    this.scene.add(line);
+    setTimeout(() => {
+      this.scene.remove(line);
+      geo.dispose();
+    }, 60);
+  }
+
+  /** Melee swing: hurts the nearest enemy or ped within range. */
+  melee(ctx) {
+    if (this.cooldown > 0) return;
+    this.cooldown = 0.45;
+    const pp = ctx.playerPos();
+    let best = null;
+    let bd = CONFIG.player.punchRange;
+    for (const e of ctx.enemies.list) {
+      const d = Math.hypot(e.pos.x - pp.x, e.pos.z - pp.z);
+      if (d < bd) { bd = d; best = { kind: 'enemy', enemy: e }; }
+    }
+    if (!best) {
+      for (const p of ctx.peds.peds) {
+        if (p.state === 'down') continue;
+        const d = Math.hypot(p.pos.x - pp.x, p.pos.z - pp.z);
+        if (d < bd) { bd = d; best = { kind: 'ped', ped: p }; }
+      }
+    }
+    if (best) {
+      if (best.kind === 'enemy') {
+        const dead = best.enemy.damage(CONFIG.player.punchDamage);
+        if (dead) {
+          ctx.enemies.remove(best.enemy);
+          this.onHit?.('enemy', best.enemy);
+        }
+      } else {
+        ctx.peds.knockDown(best.ped);
+        this.onHit?.('ped', best.ped);
+      }
+    }
+    this.onShot?.();
+  }
+
+  reload() {
+    if (this.reloading || this.ammo === CONFIG.combat.magazine) return;
+    this.reloading = true;
+    this.reloadTimer = CONFIG.combat.reloadSeconds;
+  }
+
+  update(dt) {
+    this.cooldown = Math.max(0, this.cooldown - dt);
+    if (this.reloading) {
+      this.reloadTimer -= dt;
+      if (this.reloadTimer <= 0) {
+        this.reloading = false;
+        this.ammo = CONFIG.combat.magazine;
+      }
+    }
+  }
 }
 
-/** Remove tracer lines from the scene once they fade. */
-export function pruneTracers(combat, scene) {
-  for (const t of combat.tracers) {
-    if (t.life <= 0) scene.remove(t.mesh);
+export class Enemies {
+  constructor(scene, city, rng) {
+    this.scene = scene;
+    this.city = city;
+    this.rng = rng;
+    this.list = [];
   }
-  combat.tracers = combat.tracers.filter((t) => t.life > 0);
+
+  makeEnemyMesh() {
+    const group = new THREE.Group();
+    const vest = new THREE.MeshLambertMaterial({ color: 0x5a2a6a });
+    const pants = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+    const skin = new THREE.MeshLambertMaterial({ color: 0xc98d64 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.85, 0.4), vest);
+    torso.position.y = 1.25;
+    torso.castShadow = true;
+    group.add(torso);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), skin);
+    head.position.y = 1.92;
+    group.add(head);
+    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.7), pants);
+    gun.position.set(0.3, 1.3, 0.35);
+    group.add(gun);
+    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.85, 0.26), pants);
+    legL.position.set(-0.18, 0.42, 0);
+    group.add(legL);
+    const legR = legL.clone();
+    legR.position.x = 0.18;
+    group.add(legR);
+    return group;
+  }
+
+  spawn(count, center) {
+    for (let i = 0; i < count; i++) {
+      const mesh = this.makeEnemyMesh();
+      const x = center.x + range(this.rng, -16, 16);
+      const z = center.z + range(this.rng, -16, 16);
+      mesh.position.set(x, 0, z);
+      this.scene.add(mesh);
+      const enemy = {
+        mesh,
+        pos: new THREE.Vector3(x, 0, z),
+        health: CONFIG.combat.enemyHealth,
+        shootTimer: range(this.rng, 0.5, 1.5),
+        heading: 0,
+      };
+      enemy.damage = (amount) => {
+        enemy.health -= amount;
+        return enemy.health <= 0;
+      };
+      mesh.userData.enemy = enemy;
+      this.list.push(enemy);
+    }
+  }
+
+  remove(enemy) {
+    const i = this.list.indexOf(enemy);
+    if (i >= 0) this.list.splice(i, 1);
+    this.scene.remove(enemy.mesh);
+  }
+
+  clear() {
+    for (const e of [...this.list]) this.remove(e);
+  }
+
+  update(dt, playerPos, onShootPlayer) {
+    for (const e of this.list) {
+      const dx = playerPos.x - e.pos.x;
+      const dz = playerPos.z - e.pos.z;
+      const dist = Math.hypot(dx, dz) || 1;
+      e.heading = Math.atan2(dx, dz);
+      e.mesh.rotation.y = e.heading;
+      // Close in if far, hold ground and shoot if near.
+      if (dist > 26) {
+        e.pos.x += Math.sin(e.heading) * 4.5 * dt;
+        e.pos.z += Math.cos(e.heading) * 4.5 * dt;
+        this.city.collideCircle(e.pos, 0.5);
+        e.mesh.position.copy(e.pos);
+      }
+      e.shootTimer -= dt;
+      if (e.shootTimer <= 0 && dist < CONFIG.combat.enemyRange) {
+        e.shootTimer = CONFIG.combat.enemyShotInterval * range(this.rng, 0.8, 1.3);
+        // Inaccurate: only some shots land.
+        if (this.rng() < clamp(0.38 - dist / 160, 0.1, 0.38)) {
+          onShootPlayer?.(CONFIG.combat.enemyDamage);
+        }
+      }
+    }
+  }
 }

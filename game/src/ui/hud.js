@@ -1,45 +1,76 @@
-// HUD — health, cash, wanted stars, objective, speed, ammo, messages and the
-// damage vignette. Plain DOM over the WebGL canvas, updated once a frame.
-import { starsText } from '../police/wanted.js';
+// HUD: health bar, cash, wanted stars, mission objective, speed, ammo,
+// timer, toasts and the damage vignette. Pure DOM — updated once per
+// frame from the game state, never rebuilt.
 
-export function createHud() {
-  const root = document.getElementById('hud');
-  return {
-    healthFill: document.getElementById('health-fill'),
-    healthText: document.getElementById('health-text'),
-    cash: document.getElementById('cash'),
-    stars: document.getElementById('stars'),
-    objective: document.getElementById('objective'),
-    speed: document.getElementById('speed'),
-    ammo: document.getElementById('ammo'),
-    message: document.getElementById('message'),
-    vignette: document.getElementById('vignette'),
-    crosshair: document.getElementById('crosshair'),
-    hint: document.getElementById('hint'),
-    root,
-  };
-}
+export class HUD {
+  constructor() {
+    this.el = {
+      hud: document.getElementById('hud'),
+      healthFill: document.getElementById('health-fill'),
+      healthNum: document.getElementById('health-num'),
+      cash: document.getElementById('cash'),
+      stars: document.getElementById('stars'),
+      objective: document.getElementById('objective'),
+      timer: document.getElementById('timer'),
+      speed: document.getElementById('speed'),
+      ammo: document.getElementById('ammo'),
+      message: document.getElementById('message'),
+      crosshair: document.getElementById('crosshair'),
+      vignette: document.getElementById('vignette'),
+    };
+    this.messageTimer = null;
+    this.lastStars = -1;
+  }
 
-export function updateHud(hud, g) {
-  const hp = Math.max(0, Math.round(g.player.health));
-  hud.healthFill.style.width = `${hp}%`;
-  hud.healthFill.style.background = hp > 50 ? '#3aa655' : hp > 25 ? '#e8a832' : '#c23b2e';
-  hud.healthText.textContent = `${hp}`;
-  hud.cash.textContent = `$${g.player.cash.toLocaleString('en-US')}`;
-  hud.stars.textContent = starsText(g.wanted);
-  hud.stars.style.color = g.wanted.stars > 0 ? '#ffd23e' : '#ffffff';
-  hud.objective.textContent = g.objective;
-  const kmh = Math.round(Math.abs(g.playerCar ? g.playerCar.speed : 0) * 3.6);
-  hud.speed.textContent = g.inCar ? `${kmh} km/h` : '';
-  hud.ammo.textContent = g.inCar ? '' : `🔫 ${g.combat.ammo} / ${g.combat.reserve}`;
-  hud.message.textContent = g.mission.messageTimer > 0 ? g.mission.message : '';
-  hud.message.style.opacity = g.mission.messageTimer > 0 ? '1' : '0';
-  hud.vignette.style.opacity = hp < 100 ? String((100 - hp) / 160) : '0';
-  hud.crosshair.style.display = g.inCar ? 'none' : 'block';
-  // Context hint: what E does right now.
-  let hint = '';
-  if (!g.inCar && g.nearCar) hint = '[E] Steal car';
-  else if (g.inCar) hint = '[E] Exit car · [Space] Handbrake';
-  else if (g.nearMissionCar) hint = '[E] Take the coupe';
-  hud.hint.textContent = hint;
+  show() {
+    this.el.hud.classList.remove('hidden');
+  }
+
+  hide() {
+    this.el.hud.classList.add('hidden');
+  }
+
+  /** One frame of HUD state. */
+  update(s) {
+    this.el.healthFill.style.width = `${Math.max(0, s.health)}%`;
+    this.el.healthFill.classList.toggle('low', s.health < 30);
+    this.el.healthNum.textContent = Math.ceil(Math.max(0, s.health));
+    this.el.cash.textContent = `$${s.cash.toLocaleString('en-US')}`;
+    if (s.stars !== this.lastStars) {
+      this.lastStars = s.stars;
+      this.el.stars.innerHTML = '';
+      for (let i = 0; i < 5; i++) {
+        const star = document.createElement('span');
+        star.textContent = '★';
+        star.className = i < s.stars ? 'star on' : 'star';
+        this.el.stars.appendChild(star);
+      }
+    }
+    this.el.objective.textContent = s.objective;
+    if (s.timeLeft != null && s.timeLeft > 0) {
+      const t = Math.ceil(s.timeLeft);
+      this.el.timer.textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+      this.el.timer.classList.toggle('urgent', t < 30);
+    } else {
+      this.el.timer.textContent = '';
+    }
+    this.el.speed.textContent = s.driving ? `${Math.round(Math.abs(s.speed) * 3.6)} km/h` : '';
+    this.el.ammo.textContent = s.reloading ? 'RELOADING…' : `AMMO ${s.ammo}/12`;
+    this.el.crosshair.classList.toggle('hidden', s.driving);
+  }
+
+  /** A toast line under the objective, fading after a few seconds. */
+  toast(text, ms = 4200) {
+    this.el.message.textContent = text;
+    this.el.message.classList.remove('hidden');
+    clearTimeout(this.messageTimer);
+    this.messageTimer = setTimeout(() => this.el.message.classList.add('hidden'), ms);
+  }
+
+  /** Red flash at the screen edges when Kai takes a hit. */
+  flashDamage() {
+    this.el.vignette.classList.remove('flash');
+    void this.el.vignette.offsetWidth; // restart the animation
+    this.el.vignette.classList.add('flash');
+  }
 }
