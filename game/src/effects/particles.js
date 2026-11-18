@@ -81,7 +81,7 @@ export class Particles {
   }
 
   muzzle(x, y, z) {
-    this.burst(x, y, z, { count: 6, color: 0xffe066, speed: 3, life: 0.12, gravity: 0, up: 0.5 });
+    this.burst(x, y, z, { count: 6, color: 0xffe066, speed: 3, life: 0.25, gravity: 0, up: 0.5 });
   }
 
   cashBurst(x, y, z) {

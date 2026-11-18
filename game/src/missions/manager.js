@@ -129,6 +129,7 @@ export class MissionManager {
     this.cleanupMissionObjects();
     this.active = null;
     game.hud.showMissionComplete(def);
+    game.input.releaseLock(); // the mouse must be free to click Continue
     game.state = 'missionEnd';
     game.stateTimer = 0;
   }
@@ -143,6 +144,7 @@ export class MissionManager {
     game.wanted.clear();
     game.police.clearAll();
     game.hud.showMissionFailed(def, reason);
+    game.input.releaseLock(); // the mouse must be free to click Retry
     game.state = 'missionEnd';
     game.stateTimer = 0;
   }

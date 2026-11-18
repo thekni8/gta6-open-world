@@ -29,13 +29,13 @@ export class Minimap {
     // Land: muted olive green — dark enough that blips pop, bright enough to read.
     ctx.fillStyle = '#69a854';
     ctx.fillRect(0, 0, this.size, this.size);
-    // Sea along the south edge.
+    // Sea along the south edge (starts at 242).
     ctx.fillStyle = '#2fa8c9';
-    ctx.fillRect(0, this._toMap(0, 240)[1], this.size, this.size);
-    // Beach sand strip.
+    ctx.fillRect(0, this._toMap(0, 242)[1], this.size, this.size);
+    // Beach sand strip (202..242).
     ctx.fillStyle = '#f0dca8';
-    const [, beachY] = this._toMap(0, 196);
-    ctx.fillRect(0, beachY, this.size, this._toMap(0, 240)[1] - beachY);
+    const [, beachY] = this._toMap(0, 202);
+    ctx.fillRect(0, beachY, this.size, this._toMap(0, 242)[1] - beachY);
     // Park: deeper green block.
     ctx.fillStyle = '#3f8f3f';
     const [px, py] = this._toMap(28, 84);

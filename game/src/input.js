@@ -46,10 +46,19 @@ export class Input {
     // Clicking the canvas while playing locks the pointer for mouse-look.
     canvas.addEventListener('click', () => {
       if (this.enabled && this.pointerLockWanted) {
-        canvas.requestPointerLock();
+        this._lock();
       }
     });
     this.pointerLockWanted = false;
+  }
+
+  _lock() {
+    try {
+      const p = this.canvas.requestPointerLock();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch {
+      /* pointer lock needs a user gesture; the click handler retries */
+    }
   }
 
   down(code) {
@@ -76,11 +85,7 @@ export class Input {
   requestLock() {
     this.pointerLockWanted = true;
     if (document.pointerLockElement !== this.canvas) {
-      try {
-        this.canvas.requestPointerLock();
-      } catch {
-        /* pointer lock needs a user gesture; the click handler retries */
-      }
+      this._lock();
     }
   }
 

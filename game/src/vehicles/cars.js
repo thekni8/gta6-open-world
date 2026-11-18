@@ -21,9 +21,10 @@ function sharedGeos() {
 export function makeCarMesh(color, kind = 'sedan') {
   sharedGeos();
   const group = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.35 });
-  // Slate blue-grey cabins: shaded glass, never a black hole.
-  const glass = new THREE.MeshStandardMaterial({ color: 0x4a607a, roughness: 0.15, metalness: 0.6 });
+  const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.2 });
+  // Slate blue-grey cabins: shaded glass, never a black hole. (Low metalness:
+  // with no environment map, high-metal materials render black.)
+  const glass = new THREE.MeshStandardMaterial({ color: 0x4a607a, roughness: 0.3, metalness: 0.1 });
   const tyre = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.95 });
 
   const body = new THREE.Mesh(bodyGeo, paint);

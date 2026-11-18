@@ -78,10 +78,14 @@ export class Weapons {
       this.cooldown = 0.35;
       player.punchTimer = 0.25;
       game.sound.punch();
-      game.peds.hit(victim, CONFIG.player.punchDamage, game);
+      const wentDown = game.peds.hit(victim, CONFIG.player.punchDamage, game);
+      if (wentDown) game.missions?.onEnemyDown?.(victim);
       return;
     }
-    // Pistol: raycast from the camera through the crosshair.
+    // Pistol: fire along the camera's horizontal look direction from the
+    // muzzle at chest height. (A screen-centre ray from the high follow
+    // camera dives into the ground metres ahead; the horizontal ray aims
+    // where the player is looking, like a real third-person shooter.)
     if (player.ammo <= 0) {
       game.sound.uiClick();
       player.reload(game);
@@ -90,14 +94,14 @@ export class Weapons {
     this.cooldown = 0.22;
     player.ammo -= 1;
     game.sound.gunshot();
-    const muzzle = player.pos.clone().add(new THREE.Vector3(0, 1.5, 0));
+    const muzzle = player.pos.clone().add(new THREE.Vector3(0, 1.4, 0));
     game.particles.muzzle(muzzle.x, muzzle.y, muzzle.z);
     const camera = game.cameraRig.camera;
-    this.raycaster.setFromCamera({ x: 0, y: 0 }, camera);
-    this.raycaster.far = CONFIG.player.pistolRange;
-    // Test enemies first (sphere test), then pedestrians, then buildings.
-    const dir = this.raycaster.ray.direction;
-    const origin = this.raycaster.ray.origin;
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    dir.y = 0;
+    dir.normalize();
+    const origin = muzzle.clone();
     let bestDist = CONFIG.player.pistolRange;
     let hitPed = null;
     for (const p of game.peds.peds) {
@@ -129,7 +133,7 @@ export class Weapons {
       if (!hitPed.isEnemy) {
         game.wanted.commit(wentDown ? 'killPedestrian' : 'shootWitnessed', game);
         game.peds.scare(player.pos.x, player.pos.z, 30);
-      } else {
+      } else if (wentDown) {
         game.missions?.onEnemyDown?.(hitPed);
       }
     } else if (bestDist < CONFIG.player.pistolRange - 0.5) {
@@ -146,7 +150,7 @@ export class Weapons {
       new THREE.LineBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.9 }),
     );
     this.scene.add(line);
-    this.tracers.push({ line, life: 0.07 });
+    this.tracers.push({ line, life: 0.15 });
   }
 
   update(dt, game) {

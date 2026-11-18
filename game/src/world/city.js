@@ -41,23 +41,23 @@ export function buildCity(scene, seed = 7) {
     new THREE.MeshStandardMaterial({ color: CONFIG.palette.sea, roughness: 0.35, metalness: 0.1 }),
   );
   sea.rotation.x = -Math.PI / 2;
-  sea.position.set(0, 0.05, 240 + 210);
+  sea.position.set(0, 0.05, 242 + 210);
   scene.add(sea);
   const seaDeep = new THREE.Mesh(
     new THREE.PlaneGeometry(1100, 300),
     new THREE.MeshStandardMaterial({ color: CONFIG.palette.seaDeep, roughness: 0.3 }),
   );
   seaDeep.rotation.x = -Math.PI / 2;
-  seaDeep.position.set(0, 0.04, 240 + 420 + 150);
+  seaDeep.position.set(0, 0.04, 242 + 420 + 150);
   scene.add(seaDeep);
 
-  // Sand beach along the whole south edge.
+  // Sand beach along the whole south edge (starts at the road's edge, 202).
   const beach = new THREE.Mesh(
-    new THREE.PlaneGeometry(half * 2, 48),
+    new THREE.PlaneGeometry(half * 2, 40),
     new THREE.MeshStandardMaterial({ color: CONFIG.palette.sand, roughness: 1 }),
   );
   beach.rotation.x = -Math.PI / 2;
-  beach.position.set(0, 0.03, 196 + 24);
+  beach.position.set(0, 0.03, 222);
   beach.receiveShadow = true;
   scene.add(beach);
 
@@ -136,14 +136,14 @@ export function buildCity(scene, seed = 7) {
   // Window grid texture: flat pastel slabs become real buildings.
   const windowTex = (() => {
     const c = document.createElement('canvas');
-    c.width = 128;
+    c.width = 256;
     c.height = 256;
     const g = c.getContext('2d');
     g.fillStyle = '#ffffff';
-    g.fillRect(0, 0, 128, 256);
+    g.fillRect(0, 0, 256, 256);
     g.fillStyle = '#54687c';
     for (let y = 10; y < 246; y += 16) {
-      for (let x = 8; x < 120; x += 16) g.fillRect(x, y, 9, 10);
+      for (let x = 8; x < 248; x += 16) g.fillRect(x, y, 9, 10);
     }
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
