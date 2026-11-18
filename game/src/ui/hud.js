@@ -1,5 +1,5 @@
-// HUD: health bar, cash, wanted stars, mission objective, speed, ammo,
-// timer, toasts and the damage vignette. Pure DOM — updated once per
+// HUD: health bar, cash, wanted stars, mission objective, timer, speed,
+// ammo, toasts, and the damage vignette. Pure DOM — updated once per
 // frame from the game state, never rebuilt.
 
 export class HUD {
@@ -20,6 +20,7 @@ export class HUD {
     };
     this.messageTimer = null;
     this.lastStars = -1;
+    this.lastObjective = '';
   }
 
   show() {
@@ -46,7 +47,10 @@ export class HUD {
         this.el.stars.appendChild(star);
       }
     }
-    this.el.objective.textContent = s.objective;
+    if (s.objective !== this.lastObjective) {
+      this.lastObjective = s.objective;
+      this.el.objective.textContent = s.objective;
+    }
     if (s.timeLeft != null && s.timeLeft > 0) {
       const t = Math.ceil(s.timeLeft);
       this.el.timer.textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;

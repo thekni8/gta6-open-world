@@ -1,7 +1,8 @@
-// Police response: black-and-white interceptors that spawn at the edge of
-// sight, chase the player along the roads, ram, and — at 3+ stars — set
-// roadblocks across the road ahead. Light bars flash red/blue; the siren
-// is the sound engine's job.
+// Police response: black-and-white interceptors that spawn on the road
+// ring around the player, chase with a touch of interception (they aim
+// where the player is going, not where they are), ram on contact, and —
+// at 3+ stars — set roadblocks across the road ahead. Light bars flash
+// red/blue; the siren is the sound engine's job.
 
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
@@ -15,10 +16,11 @@ export class Police {
     this.rng = rng;
     this.cars = [];
     this.flashTimer = 0;
+    this.blockTimer = 0;
     this.onRam = null; // () => {} — wired by main for damage + shake
   }
 
-  makePoliceCar(x, z, heading) {
+  makeInterceptor(x, z, heading) {
     const car = new Car(this.scene, CONFIG.palette.police, 'sedan', x, z, heading);
     // White doors: a thin white box over the body.
     const doors = new THREE.Mesh(
@@ -46,9 +48,9 @@ export class Police {
     return car;
   }
 
-  /** How many police cars the current stars call for. */
+  /** How many interceptors the current stars call for. */
   desiredCount(stars) {
-    return CONFIG.police.carsPerStar[clamp(stars, 0, 5)];
+    return CONFIG.police.fleet[clamp(stars, 0, 5)];
   }
 
   spawnNear(playerPos, minDist = 45) {
@@ -60,14 +62,18 @@ export class Police {
       const z = playerPos.z + Math.cos(angle) * dist;
       const road = this.city.nearestRoad(x, z);
       if (Math.abs(road.x) > 300 || Math.abs(road.z) > 300) continue;
-      const car = this.makePoliceCar(road.x, road.z, Math.atan2(playerPos.x - road.x, playerPos.z - road.z));
+      const car = this.makeInterceptor(
+        road.x,
+        road.z,
+        Math.atan2(playerPos.x - road.x, playerPos.z - road.z),
+      );
       this.cars.push(car);
       return car;
     }
     return null;
   }
 
-  /** A roadblock: two police cars parked across the road ahead of the player. */
+  /** A roadblock: two interceptors parked across the road ahead. */
   roadblock(playerPos, playerHeading) {
     const ahead = 34;
     const cx = playerPos.x + Math.sin(playerHeading) * ahead;
@@ -75,7 +81,7 @@ export class Police {
     const road = this.city.nearestRoad(cx, cz);
     const perp = playerHeading + Math.PI / 2;
     for (const side of [-1, 1]) {
-      const car = this.makePoliceCar(
+      const car = this.makeInterceptor(
         road.x + Math.sin(perp) * side * 2.4,
         road.z + Math.cos(perp) * side * 2.4,
         playerHeading + Math.PI / 2,
@@ -90,7 +96,7 @@ export class Police {
   canSee(playerPos) {
     for (const car of this.cars) {
       const d = Math.hypot(car.pos.x - playerPos.x, car.pos.z - playerPos.z);
-      if (d < CONFIG.police.sightRange) return true;
+      if (d < CONFIG.police.sight) return true;
     }
     return false;
   }
@@ -100,7 +106,7 @@ export class Police {
     this.cars = [];
   }
 
-  update(dt, stars, playerPos, playerHeading, playerCar, onPlayerHit) {
+  update(dt, stars, playerPos, playerHeading, playerCar, playerSpeed, onPlayerHit) {
     this.flashTimer += dt;
     const flash = Math.floor(this.flashTimer * 6) % 2 === 0;
     // Match the fleet to the wanted level. Roadblock cars are parked, not
@@ -119,33 +125,37 @@ export class Police {
       let fd = -1;
       chasers.forEach((c, i) => {
         const d = Math.hypot(c.pos.x - playerPos.x, c.pos.z - playerPos.z);
-        if (d > fd) { fd = d; far = i; }
+        if (d > fd) {
+          fd = d;
+          far = i;
+        }
       });
       const dropped = chasers.splice(far, 1)[0];
       dropped.remove();
       this.cars.splice(this.cars.indexOf(dropped), 1);
     }
-    // Roadblocks at 3+ stars, at most once every 25 s.
-    this.blockTimer = (this.blockTimer ?? 0) - dt;
-    if (stars >= CONFIG.police.roadblockAtStars && this.blockTimer <= 0) {
+    // Roadblocks at 3+ stars, at most once per cooldown.
+    this.blockTimer -= dt;
+    if (stars >= CONFIG.police.roadblockStars && this.blockTimer <= 0) {
       this.roadblock(playerPos, playerHeading);
-      this.blockTimer = 25;
+      this.blockTimer = CONFIG.police.roadblockCooldown;
     }
     for (const car of this.cars) {
       car.lightRed.visible = flash;
       car.lightBlue.visible = !flash;
-      if (car.blocker) {
-        // Parked across the road; it just sits there flashing.
-        continue;
-      }
-      // Chase: steer toward the player, throttle up, ram on contact.
-      const dx = playerPos.x - car.pos.x;
-      const dz = playerPos.z - car.pos.z;
+      if (car.blocker) continue; // parked across the road, just flashing
+      // Chase: aim a little ahead of a moving player (interception), then
+      // steer, throttle up, and ram on contact.
+      const lead = playerCar ? Math.min(1.2, playerSpeed * 0.03) : 0;
+      const tx = playerPos.x + Math.sin(playerHeading) * playerSpeed * lead;
+      const tz = playerPos.z + Math.cos(playerHeading) * playerSpeed * lead;
+      const dx = tx - car.pos.x;
+      const dz = tz - car.pos.z;
       const dist = Math.hypot(dx, dz) || 1;
       const wantHeading = Math.atan2(dx, dz);
       const turn = clamp(angleDelta(car.heading, wantHeading), -1, 1);
       car.steer = turn * 0.6;
-      car.speed += (CONFIG.police.chaseSpeed - car.speed) * Math.min(1, dt * 0.8);
+      car.speed += (CONFIG.police.pursuitSpeed - car.speed) * Math.min(1, dt * 0.8);
       car.heading += turn * 1.8 * dt * Math.sign(car.speed || 1);
       car.pos.x += Math.sin(car.heading) * car.speed * dt;
       car.pos.z += Math.cos(car.heading) * car.speed * dt;
@@ -159,11 +169,11 @@ export class Police {
         car.speed *= 0.4;
         onPlayerHit?.(CONFIG.police.ramDamage);
         this.onRam?.();
-        // Bounce the police car back so it doesn't stick.
+        // Bounce the interceptor back so it doesn't stick.
         car.pos.x -= Math.sin(car.heading) * 1.2;
         car.pos.z -= Math.cos(car.heading) * 1.2;
       }
-      // Give up if hopelessly far away.
+      // Give up if hopelessly far away: respawn near the player.
       if (dist > 260) {
         const road = this.city.nearestRoad(playerPos.x, playerPos.z);
         car.pos.set(road.x, 0, road.z);
@@ -171,7 +181,7 @@ export class Police {
       }
     }
     // Drop blockers once the heat is gone.
-    if (stars < CONFIG.police.roadblockAtStars) {
+    if (stars < CONFIG.police.roadblockStars) {
       for (let i = this.cars.length - 1; i >= 0; i--) {
         if (this.cars[i].blocker) {
           this.cars[i].remove();

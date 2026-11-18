@@ -1,74 +1,67 @@
-// Keyboard + mouse handling. Tracks held keys, click edges, and the camera
-// orbit deltas (pointer lock when available, drag fallback for headless or
-// no-lock browsers). The game reads this, never raw DOM events.
+// Keyboard and mouse. The game never reads raw DOM events — it polls
+// this once per frame for held keys, fresh presses, click edges, and the
+// camera orbit deltas. Pointer lock drives the mouse when the browser
+// grants it; dragging is the fallback for headless or no-lock browsers.
+
+const SCROLL_KEYS = new Set(['Space', 'ArrowUp', 'ArrowDown', 'Tab']);
 
 export class Input {
   constructor(canvas) {
     this.canvas = canvas;
-    this.keys = new Set();
-    this.pressed = new Set(); // keys pressed since last poll()
-    this.mouseDX = 0;
-    this.mouseDY = 0;
-    this.mouseDown = false;
-    this.mouseClicked = false; // left button pressed since last poll()
+    this.held = new Set();
+    this.fresh = new Set(); // codes pressed since the last poll()
+    this.orbitX = 0; // accumulated mouse deltas since the last poll()
+    this.orbitY = 0;
+    this.clicked = false; // left button pressed since the last poll()
     this.locked = false;
     this.dragging = false;
-    this.lastX = 0;
-    this.lastY = 0;
+    this.dragX = 0;
+    this.dragY = 0;
 
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
-      this.keys.add(e.code);
-      this.pressed.add(e.code);
-      if (['Space', 'ArrowUp', 'ArrowDown', 'Tab'].includes(e.code)) e.preventDefault();
+      this.held.add(e.code);
+      this.fresh.add(e.code);
+      if (SCROLL_KEYS.has(e.code)) e.preventDefault();
     });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('keyup', (e) => this.held.delete(e.code));
+    window.addEventListener('blur', () => {
+      this.held.clear();
+      this.dragging = false;
+    });
 
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === canvas;
     });
     canvas.addEventListener('mousedown', (e) => {
-      if (e.button === 0) {
-        this.mouseDown = true;
-        this.mouseClicked = true;
-        this.dragging = true;
-        this.lastX = e.clientX;
-        this.lastY = e.clientY;
-        if (!this.locked && document.pointerLockElement !== canvas) {
-          canvas.requestPointerLock?.();
-        }
-      }
+      if (e.button !== 0) return;
+      this.clicked = true;
+      this.dragging = true;
+      this.dragX = e.clientX;
+      this.dragY = e.clientY;
+      if (!this.locked) canvas.requestPointerLock?.();
     });
     window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) {
-        this.mouseDown = false;
-        this.dragging = false;
-      }
+      if (e.button === 0) this.dragging = false;
     });
     window.addEventListener('mousemove', (e) => {
       if (this.locked) {
-        this.mouseDX += e.movementX;
-        this.mouseDY += e.movementY;
+        this.orbitX += e.movementX;
+        this.orbitY += e.movementY;
       } else if (this.dragging) {
-        this.mouseDX += e.clientX - this.lastX;
-        this.mouseDY += e.clientY - this.lastY;
-        this.lastX = e.clientX;
-        this.lastY = e.clientY;
+        this.orbitX += e.clientX - this.dragX;
+        this.orbitY += e.clientY - this.dragY;
+        this.dragX = e.clientX;
+        this.dragY = e.clientY;
       }
     });
   }
 
   down(code) {
-    return this.keys.has(code);
+    return this.held.has(code);
   }
 
-  /** True once per physical press; consumed by poll(). */
-  wasPressed(code) {
-    return this.pressed.has(code);
-  }
-
-  /** WASD/arrows as a -1..1 pair, in camera space (x = strafe, y = forward). */
+  /** WASD/arrows as a -1..1 pair in camera space (x = strafe, y = forward). */
   moveAxis() {
     let x = 0;
     let y = 0;
@@ -79,18 +72,22 @@ export class Input {
     return { x, y };
   }
 
+  sprinting() {
+    return this.down('ShiftLeft') || this.down('ShiftRight');
+  }
+
   /** Consume this frame's edges and mouse deltas. Call once per tick. */
   poll() {
-    const out = {
-      pressed: this.pressed,
-      clicked: this.mouseClicked,
-      dx: this.mouseDX,
-      dy: this.mouseDY,
+    const frame = {
+      pressed: this.fresh,
+      clicked: this.clicked,
+      dx: this.orbitX,
+      dy: this.orbitY,
     };
-    this.pressed = new Set();
-    this.mouseClicked = false;
-    this.mouseDX = 0;
-    this.mouseDY = 0;
-    return out;
+    this.fresh = new Set();
+    this.clicked = false;
+    this.orbitX = 0;
+    this.orbitY = 0;
+    return frame;
   }
 }

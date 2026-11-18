@@ -1,13 +1,15 @@
-// Pedestrians: capsule figures strolling the sidewalks, crossing at
-// corners, and fleeing when the player shoots, speeds past, or runs one
-// down. Hitting one is a crime — the wanted system is watching.
+// Pedestrians: figures strolling the sidewalks, turning at corners, and
+// fleeing when the player shoots, speeds past, or runs one down. Hitting
+// one is a crime — the wanted system is watching.
 
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
-import { range, pick, clamp } from '../util/random.js';
+import { range, choice } from '../util/random.js';
 
 const SHIRTS = [0xd95f4b, 0x4b8fd9, 0x6abf6a, 0xd9c24b, 0x9b59b6, 0xe8e8e8, 0x34495e, 0xe67e22];
 const PANTS = [0x2a3550, 0x4a4a4a, 0x6a4a2a, 0x2a2a2a];
+const SKINS = [0xc98d64, 0x8a5a3a, 0xe8b890, 0x6a4a2a];
+const HEADINGS = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
 
 export class Pedestrians {
   constructor(scene, city, rng) {
@@ -16,14 +18,14 @@ export class Pedestrians {
     this.rng = rng;
     this.peds = [];
     this.onHit = null; // (ped) => {} — wired by main for wanted + effects
-    for (let i = 0; i < CONFIG.traffic.pedCount; i++) this.spawnPed();
+    for (let i = 0; i < CONFIG.crowd.pedestrians; i++) this.spawnPed();
   }
 
-  makePedMesh() {
+  makeFigure() {
     const group = new THREE.Group();
-    const shirt = new THREE.MeshLambertMaterial({ color: pick(this.rng, SHIRTS) });
-    const pants = new THREE.MeshLambertMaterial({ color: pick(this.rng, PANTS) });
-    const skin = new THREE.MeshLambertMaterial({ color: pick(this.rng, [0xc98d64, 0x8a5a3a, 0xe8b890, 0x6a4a2a]) });
+    const shirt = new THREE.MeshLambertMaterial({ color: choice(this.rng, SHIRTS) });
+    const pants = new THREE.MeshLambertMaterial({ color: choice(this.rng, PANTS) });
+    const skin = new THREE.MeshLambertMaterial({ color: choice(this.rng, SKINS) });
     const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.8, 0.36), shirt);
     torso.position.y = 1.2;
     torso.castShadow = true;
@@ -43,20 +45,21 @@ export class Pedestrians {
   }
 
   spawnPed(at) {
-    // Sidewalk: just off a road centre line, inside a block edge.
+    // Sidewalk: just off a road centre line, on a block edge.
     const p = at ?? this.city.randomRoadPoint();
     const road = this.city.nearestRoad(p.x, p.z);
-    const side = this.rng() < 0.5 ? 9 : -9;
-    const x = Math.abs(road.x - p.x) < Math.abs(road.z - p.z) ? road.x + side : p.x;
-    const z = Math.abs(road.x - p.x) < Math.abs(road.z - p.z) ? p.z : road.z + side;
-    const mesh = this.makePedMesh();
+    const side = this.rng() < 0.5 ? 9.5 : -9.5;
+    const onXRoad = Math.abs(road.x - p.x) < Math.abs(road.z - p.z);
+    const x = onXRoad ? road.x + side : p.x;
+    const z = onXRoad ? p.z : road.z + side;
+    const mesh = this.makeFigure();
     mesh.position.set(x, 0, z);
     this.scene.add(mesh);
     const ped = {
       mesh,
       pos: new THREE.Vector3(x, 0, z),
-      heading: pick(this.rng, [0, Math.PI / 2, Math.PI, -Math.PI / 2]),
-      speed: range(this.rng, 1.1, 2.1),
+      heading: choice(this.rng, HEADINGS),
+      speed: range(this.rng, CONFIG.crowd.pedWalkMin, CONFIG.crowd.pedWalkMax),
       phase: this.rng() * 10,
       state: 'walk', // walk | flee | down
       downTimer: 0,
@@ -80,7 +83,7 @@ export class Pedestrians {
     }
   }
 
-  /** Knock a pedestrian down (car hit or bullet). Returns the ped. */
+  /** Knock a pedestrian down (car hit or bullet). */
   knockDown(ped) {
     ped.state = 'down';
     ped.downTimer = 6;
@@ -105,9 +108,9 @@ export class Pedestrians {
         if (ped.fleeTimer <= 0) ped.state = 'walk';
       }
       const speed = ped.state === 'flee' ? ped.speed * 2.6 : ped.speed;
-      // Turn at intersections sometimes; fleeing peds run straight.
+      // Turn at corners sometimes; fleeing peds run straight.
       if (ped.state === 'walk' && this.rng() < dt * 0.25) {
-        ped.heading = pick(this.rng, [0, Math.PI / 2, Math.PI, -Math.PI / 2]);
+        ped.heading = choice(this.rng, HEADINGS);
       }
       ped.pos.x += Math.sin(ped.heading) * speed * dt;
       ped.pos.z += Math.cos(ped.heading) * speed * dt;
@@ -132,6 +135,6 @@ export class Pedestrians {
         }
       }
     }
-    while (this.peds.length < CONFIG.traffic.pedCount) this.spawnPed();
+    while (this.peds.length < CONFIG.crowd.pedestrians) this.spawnPed();
   }
 }

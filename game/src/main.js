@@ -5,14 +5,14 @@
 
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { mulberry32, clamp } from './util/random.js';
+import { seededRandom, clamp, flatDist } from './util/random.js';
 import { Input } from './input.js';
 import { SoundEngine } from './audio/sound.js';
 import { Daylight } from './world/daylight.js';
 import { buildCity } from './world/city.js';
 import { Character } from './player/character.js';
 import { FollowCamera } from './player/camera.js';
-import { Car, randomCarColor } from './vehicles/cars.js';
+import { Car } from './vehicles/cars.js';
 import { Traffic } from './vehicles/traffic.js';
 import { Pedestrians } from './people/pedestrians.js';
 import { Wanted } from './police/wanted.js';
@@ -37,12 +37,13 @@ class Game {
     this.menuOrbit = 0;
     this.saveTimer = 0;
     this.smokeTimer = 0;
+    this.exhaustTimer = 0;
     // Screenshot staging: ?scene=… presets set sceneName; the game raises
     // window.__shotReady once the staged action has settled (police closed
     // in, traffic in frame), so the shot driver captures the peak moment.
     this.sceneName = null;
     this.shotTimer = 0;
-    this.exhaustTimer = 0;
+    this.chaseBlockerStaged = false;
 
     const canvas = $('game');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -50,15 +51,17 @@ class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.08;
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1200);
+    this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1400);
     window.addEventListener('resize', () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    const rng = mulberry32(20261117);
+    const rng = seededRandom(CONFIG.world.seed);
     this.rng = rng;
     this.daylight = new Daylight(this.scene);
     this.city = buildCity(this.scene, rng);
@@ -79,6 +82,7 @@ class Game {
     this.missionCar = null;
     this.headlightL = null;
     this.headlightR = null;
+    this.headlightsOn = false;
     this.markerPos = null;
     this.choiceMarkers = null;
 
@@ -114,6 +118,7 @@ class Game {
       pos: () => ({ x: this.playerPos().x, z: this.playerPos().z }),
       enemies: () => this.enemies.list.length,
       police: () => this.police.cars.length,
+      ammo: () => this.weapons.ammo,
     };
     window.__ready = false;
 
@@ -161,7 +166,9 @@ class Game {
       const g = new THREE.Group();
       const beam = new THREE.Mesh(
         new THREE.CylinderGeometry(1.4, 1.4, 42, 16, 1, true),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }),
+        new THREE.MeshBasicMaterial({
+          color, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false,
+        }),
       );
       beam.position.y = 21;
       g.add(beam);
@@ -218,7 +225,6 @@ class Game {
     };
     this.headlightL = mkLight();
     this.headlightR = mkLight();
-    this.headlightsOn = false;
   }
 
   updateHeadlights() {
@@ -229,7 +235,11 @@ class Game {
       if (car) {
         const fx = Math.sin(car.heading);
         const fz = Math.cos(car.heading);
-        light.position.set(car.pos.x + Math.cos(car.heading) * side * -1 + fx * 2, 1.1, car.pos.z + fz * 2 + Math.sin(car.heading) * side);
+        light.position.set(
+          car.pos.x + Math.cos(car.heading) * side * -1 + fx * 2,
+          1.1,
+          car.pos.z + fz * 2 + Math.sin(car.heading) * side,
+        );
         light.target.position.set(car.pos.x + fx * 30, 0, car.pos.z + fz * 30);
       }
     }
@@ -250,7 +260,8 @@ class Game {
     };
     this.weapons.onShot = () => {
       this.sound.shot();
-      this.peds.scare(this.playerPos().x, this.playerPos().z, 26);
+      const pp = this.playerPos();
+      this.peds.scare(pp.x, pp.z, 26);
       this.addCrime('shoot');
     };
     this.weapons.onHit = (kind) => {
@@ -258,8 +269,9 @@ class Game {
       if (kind === 'ped') this.addCrime('killPedestrian');
       if (kind === 'car') {
         // Shooting a police car is worse than shooting a civilian one.
+        const pp = this.playerPos();
         const nearPolice = this.police.cars.some(
-          (c) => Math.hypot(c.pos.x - this.playerPos().x, c.pos.z - this.playerPos().z) < 40,
+          (c) => flatDist(c.pos.x, c.pos.z, pp.x, pp.z) < 40,
         );
         if (nearPolice) this.addCrime('hitPolice');
       }
@@ -283,7 +295,7 @@ class Game {
       this.setMode('end');
       const next = this.missions.index < MISSIONS.length;
       this.menus.showEnd({
-        title: payload.def.title + ' — Complete',
+        title: `${payload.def.title} — Complete`,
         text: `${payload.outro} Reward: $${payload.reward.toLocaleString('en-US')}.`,
         nextLabel: next ? 'Next mission' : 'Free roam',
         showNext: true,
@@ -292,7 +304,7 @@ class Game {
     } else if (kind === 'failed') {
       this.setMode('end');
       this.menus.showEnd({
-        title: payload.def.title + ' — Failed',
+        title: `${payload.def.title} — Failed`,
         text: payload.reason,
         nextLabel: 'Retry mission',
         showNext: false,
@@ -321,8 +333,10 @@ class Game {
   newGame() {
     Save.clear();
     this.cash = 200;
-    this.player.respawn(30, 210);
+    const s = this.city.landmarks.spawn;
+    this.player.respawn(s.x, s.z);
     this.playerCar = null;
+    this.autoDrive = false;
     this.wanted.clear();
     this.police.clearAll();
     this.enemies.clear();
@@ -341,7 +355,7 @@ class Game {
     const save = Save.load();
     if (!save) return this.newGame();
     this.cash = save.cash ?? 200;
-    this.player.respawn(save.x ?? 30, save.z ?? 210);
+    this.player.respawn(save.x ?? 128, save.z ?? 224);
     this.player.health = save.health ?? 100;
     this.missions.index = clamp(save.missionIndex ?? 0, 0, MISSIONS.length - 1);
     this.missions.completed = save.missionIndex ?? 0;
@@ -353,8 +367,9 @@ class Game {
   }
 
   restartMission() {
-    this.player.respawn(30, 210);
-    this.playerCar = null;
+    const s = this.city.landmarks.spawn;
+    this.player.respawn(s.x, s.z);
+    if (this.playerCar) this.exitCar();
     this.wanted.clear();
     this.police.clearAll();
     this.enemies.clear();
@@ -398,7 +413,7 @@ class Game {
 
   // ---- cars ---------------------------------------------------------------
   spawnMissionCar(at) {
-    const car = new Car(this.scene, 0xf5c518, 'sedan', at.x + 6, at.z, 0);
+    const car = new Car(this.scene, CONFIG.palette.gold, 'sport', at.x + 6, at.z, 0);
     car.isMissionCar = true;
     this.traffic.cars.push(car);
     this.missionCar = car;
@@ -473,6 +488,13 @@ class Game {
     this.followCam.addShake(0.4);
     if (died) {
       this.cash = Math.floor(this.cash * 0.9);
+      this.player.respawn(
+        this.city.landmarks.safehouse.x,
+        this.city.landmarks.safehouse.z,
+      );
+      this.wanted.clear();
+      this.police.clearAll();
+      this.missions.fail('Kai went down.');
       this.setMode('end');
       this.menus.showEnd({
         title: 'Kai went down',
@@ -481,10 +503,6 @@ class Game {
         showNext: false,
         showRetry: true,
       });
-      this.player.respawn(this.city.landmarks.safehouse.x, this.city.landmarks.safehouse.z);
-      this.wanted.clear();
-      this.police.clearAll();
-      this.missions.fail('Kai went down.');
       this.saveGame();
     }
   }
@@ -504,10 +522,11 @@ class Game {
     this.newGame();
     const L = this.city.landmarks;
     if (name === 'chase') {
+      // Hot Pursuit: wanted 3, escape the PD — the cover shot.
       this.missions.active = null;
       this.hideMarker();
-      this.missions.startMission(2); // Hot Pursuit: wanted 3, escape the PD
-      const car = this.giveCar(0xc0392b, -240, -40, 0);
+      this.missions.startMission(2);
+      const car = this.giveCar(0xc0392b, -256, -40, 0);
       car.speed = 26;
       this.followCam.yaw = Math.PI;
       this.followCam.pitch = 0.3;
@@ -523,51 +542,52 @@ class Game {
       this.police.blockTimer = 45;
       // Traffic to weave through, same direction, up the beachfront road.
       for (const z of [45, 95]) {
-        const tc = this.traffic.spawnCar({ x: -240, z });
+        const tc = this.traffic.spawnCar({ x: -256, z });
         tc.heading = 0;
         tc.cruise = 9;
       }
       // Pedestrians scattering on the sidewalk beside the chase.
       for (let i = 0; i < 4; i++) {
-        this.peds.spawnPed({ x: -228, z: -24 + i * 14 });
+        this.peds.spawnPed({ x: -244, z: -24 + i * 14 });
       }
     } else if (name === 'foot') {
-      this.player.respawn(9, 60);
+      this.player.respawn(8, 64);
       this.player.heading = Math.PI;
       this.followCam.yaw = Math.PI * 0.95;
       this.followCam.pitch = 0.3;
       // A little street life around the player for the shot.
       for (let i = 0; i < 8; i++) {
-        this.peds.spawnPed({ x: 9 + (i - 4) * 3, z: 48 + i * 5 });
+        this.peds.spawnPed({ x: 8 + (i - 4) * 3, z: 52 + i * 5 });
       }
       // Cars rolling past on the cross street.
       for (const x of [-40, 30]) {
-        const tc = this.traffic.spawnCar({ x, z: 60 });
+        const tc = this.traffic.spawnCar({ x, z: 64 });
         tc.heading = Math.PI / 2;
         tc.cruise = 9;
       }
     } else if (name === 'drive') {
-      const car = this.giveCar(0x2e86c1, -240, 120, 0);
+      const car = this.giveCar(0x2e86c1, -256, 128, 0);
       car.speed = 24;
       this.followCam.yaw = Math.PI;
       this.followCam.pitch = 0.3;
       this.autoDrive = true;
       // Traffic ahead on the beachfront strip, sea glinting to the left.
-      for (const z of [205, 255]) {
-        const tc = this.traffic.spawnCar({ x: -240, z });
+      for (const z of [210, 250]) {
+        const tc = this.traffic.spawnCar({ x: -256, z });
         tc.heading = 0;
         tc.cruise = 10;
       }
       for (let i = 0; i < 3; i++) {
-        this.peds.spawnPed({ x: -228, z: 140 + i * 12 });
+        this.peds.spawnPed({ x: -244, z: 148 + i * 12 });
       }
     } else if (name === 'mission') {
+      // Port Ambush: gunmen at the port, Kai on foot in the crosshair.
       this.missions.active = null;
       this.hideMarker();
-      this.missions.startMission(3); // Port Ambush
+      this.missions.startMission(3);
       this.player.respawn(L.port.x - 22, L.port.z + 8);
       this.player.heading = Math.PI / 2;
-      this.followCam.yaw = Math.PI * 1.5;
+      this.followCam.yaw = -Math.PI / 2;
       this.followCam.pitch = 0.3;
       // Gunmen stand on the camera axis, in the crosshair.
       const first = this.enemies.list[0];
@@ -630,7 +650,7 @@ class Game {
     const axis = this.input.moveAxis();
     const playerPos = this.playerPos();
 
-    // --- enter / exit car
+    // --- enter / exit car, lights, reload, melee
     if (input.pressed.has('KeyE')) this.tryEnterCar();
     if (input.pressed.has('KeyF')) {
       this.headlightsOn = !this.headlightsOn;
@@ -643,14 +663,14 @@ class Game {
     if (this.playerCar) {
       const car = this.playerCar;
       // Auto-drive (screenshot presets): steer back toward the centre line
-      // of the road the car is on, with only a gentle weave — the old fixed
-      // sine wave wandered the car onto the sidewalk and into pedestrians.
+      // of the road the car is on, with only a gentle weave.
       const laneSteer = (() => {
         const road = this.city.nearestRoad(car.pos.x, car.pos.z);
         const rx = Math.cos(car.heading);
         const rz = -Math.sin(car.heading);
         const lateral = (car.pos.x - road.x) * rx + (car.pos.z - road.z) * rz;
-        return Math.max(-0.35, Math.min(0.35, -lateral * 0.08)) + Math.sin(performance.now() / 2600) * 0.06;
+        return Math.max(-0.35, Math.min(0.35, -lateral * 0.08))
+          + Math.sin(performance.now() / 2600) * 0.06;
       })();
       const driveInput = this.autoDrive
         ? { throttle: true, brake: false, steer: laneSteer, handbrake: false }
@@ -661,10 +681,14 @@ class Game {
             handbrake: this.input.down('Space'),
           };
       const speed = car.drive(dt, driveInput, this.city);
-      this.sound.setEngine(Math.abs(speed) / CONFIG.car.maxSpeed, true);
+      this.sound.setEngine(Math.abs(speed) / CONFIG.car.topSpeed, true);
       // Skid marks while handbraking at speed.
       if (driveInput.handbrake && Math.abs(speed) > 8 && Math.random() < dt * 20) {
-        this.particles.skid(car.pos.x - Math.sin(car.heading) * 1.4, car.pos.z - Math.cos(car.heading) * 1.4, car.heading);
+        this.particles.skid(
+          car.pos.x - Math.sin(car.heading) * 1.4,
+          car.pos.z - Math.cos(car.heading) * 1.4,
+          car.heading,
+        );
       }
       // Smoke from a wrecked car.
       this.smokeTimer -= dt;
@@ -683,7 +707,7 @@ class Game {
       }
       // Collisions with traffic cars.
       for (const other of [...this.traffic.cars]) {
-        const d = Math.hypot(other.pos.x - car.pos.x, other.pos.z - car.pos.z);
+        const d = flatDist(other.pos.x, other.pos.z, car.pos.x, car.pos.z);
         if (d < 3.4 && d > 0.01) {
           const push = (3.4 - d) / 2;
           const nx = (car.pos.x - other.pos.x) / d;
@@ -705,7 +729,7 @@ class Game {
       }
       // Police cars are solid too.
       for (const pc of this.police.cars) {
-        const d = Math.hypot(pc.pos.x - car.pos.x, pc.pos.z - car.pos.z);
+        const d = flatDist(pc.pos.x, pc.pos.z, car.pos.x, car.pos.z);
         if (d < 3.4 && d > 0.01) {
           car.pos.x += ((car.pos.x - pc.pos.x) / d) * (3.4 - d);
           car.pos.z += ((car.pos.z - pc.pos.z) / d) * (3.4 - d);
@@ -713,11 +737,11 @@ class Game {
         }
       }
     } else {
-      this.player.update(dt, axis, this.followCam.yaw, this.input.down('ShiftLeft') || this.input.down('ShiftRight'), this.city);
+      this.player.update(dt, axis, this.followCam.yaw, this.input.sprinting(), this.city);
       this.sound.setEngine(0, false);
       // Traffic cars can run the player down.
       for (const tc of this.traffic.cars) {
-        const d = Math.hypot(tc.pos.x - this.player.pos.x, tc.pos.z - this.player.pos.z);
+        const d = flatDist(tc.pos.x, tc.pos.z, this.player.pos.x, this.player.pos.z);
         if (d < 1.9 && Math.abs(tc.speed) > 2) {
           this.damagePlayer(18);
           this.player.pos.x += (this.player.pos.x - tc.pos.x) * 1.5;
@@ -734,9 +758,18 @@ class Game {
     this.weapons.update(dt);
     this.traffic.update(dt, this.player.pos, this.playerCar);
     this.peds.update(dt, this.player, this.playerCar);
-    const inLayLow = Math.hypot(playerPos.x - this.city.landmarks.safehouse.x, playerPos.z - this.city.landmarks.safehouse.z) < this.city.landmarks.safehouse.r;
+    const sh = this.city.landmarks.safehouse;
+    const inLayLow = flatDist(playerPos.x, playerPos.z, sh.x, sh.z) < sh.r;
     this.wanted.update(dt, this.police.canSee(playerPos), inLayLow);
-    this.police.update(dt, this.wanted.stars, playerPos, this.playerCar ? this.playerCar.heading : this.player.heading, this.playerCar, (dmg) => this.damagePlayer(dmg));
+    this.police.update(
+      dt,
+      this.wanted.stars,
+      playerPos,
+      this.playerCar ? this.playerCar.heading : this.player.heading,
+      this.playerCar,
+      this.playerCar ? Math.abs(this.playerCar.speed) : this.player.speed,
+      (dmg) => this.damagePlayer(dmg),
+    );
     this.enemies.update(dt, playerPos, (dmg) => this.damagePlayer(dmg));
     this.missions.update(dt);
     this.particles.update(dt);
@@ -744,7 +777,6 @@ class Game {
     this.updateHeadlights();
 
     // --- camera + HUD
-    const focus = this.playerCar ?? this.player;
     const focusPos = this.playerCar ? this.playerCar.pos : this.player.pos;
     const focusHeading = this.playerCar ? this.playerCar.heading : this.player.heading;
     this.followCam.update(dt, focusPos, focusHeading, this.city, !!this.playerCar);
@@ -773,9 +805,8 @@ class Game {
       const big = $('bigmap');
       if (big) {
         const ctx2d = big.getContext('2d');
-        const tmp = this.minimap.canvas;
         ctx2d.clearRect(0, 0, big.width, big.height);
-        ctx2d.drawImage(tmp, 0, 0, big.width, big.height);
+        ctx2d.drawImage(this.minimap.canvas, 0, 0, big.width, big.height);
       }
     }
 
@@ -815,6 +846,7 @@ try {
 } catch (err) {
   console.error(err);
   window.__error = String(err && err.message ? err.message : err);
+  window.__gameError = window.__error;
   const el = document.getElementById('fatal');
   if (el) {
     el.textContent = `Game failed to start: ${err.message}`;

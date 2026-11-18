@@ -51,7 +51,7 @@ export class Menus {
     this.el.pause.classList.add('hidden');
   }
 
-  /** Mission complete: title, outro text, reward, next button. */
+  /** Mission complete / failed: title, text, and the right buttons. */
   showEnd({ title, text, nextLabel, showNext, showRetry }) {
     this.el.endTitle.textContent = title;
     this.el.endText.textContent = text;

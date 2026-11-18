@@ -1,6 +1,6 @@
-// Wanted level: 0–5 stars for crimes, with heat that decays when the
+// Wanted level: 0–5 stars for crimes, with heat that bleeds off when the
 // player stays out of police sight. The safehouse block is a lay-low zone
-// where stars bleed off fast.
+// where stars drop fast.
 
 import { CONFIG } from '../config.js';
 import { clamp } from '../util/random.js';
@@ -26,10 +26,11 @@ export class Wanted {
     if (this.stars === 0) return;
     this.stars = 0;
     this.heat = 0;
+    this.unseenTimer = 0;
     this.onChange?.(0);
   }
 
-  /** dt tick: decay when unseen, fast decay in the lay-low zone. */
+  /** Tick: decay when unseen, fast decay in the lay-low zone. */
   update(dt, policeCanSee, inLayLow) {
     if (this.stars === 0) return;
     if (policeCanSee) {

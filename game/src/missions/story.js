@@ -1,6 +1,7 @@
-// The story of Meridian Bay: Kai Mercer, a driver-for-hire, pulled into a
-// turf war between the Harbor Kings (dockside smugglers) and the Vesper
-// Syndicate (nightclub money). Five missions, all original names and places.
+// The story of Meridian Bay: Kai Mercer, a driver-for-hire, pulled into
+// a turf war between the Harbor Kings (dockside smugglers) and the Vesper
+// Syndicate (nightclub money). Five missions, all original names, crews,
+// and places.
 
 export const STORY = {
   hero: 'Kai Mercer',
@@ -9,14 +10,14 @@ export const STORY = {
     vesper: 'Vesper Syndicate',
   },
   intro:
-    'Meridian Bay. You are Kai Mercer, a driver-for-hire with a fast car and a slow rent. Two crews want you — and tonight, both of them are calling.',
+    'Meridian Bay. You are Kai Mercer, a driver-for-hire with a fast car and slow rent. Two crews want you — and tonight, both of them are calling.',
 };
 
 export const MISSIONS = [
   {
     id: 'delivery',
     title: 'Mission 1 — First Delivery',
-    intro: 'Rook from the Harbor Kings needs a package at the marina. Drive it there. No questions, no stops.',
+    intro: 'Rook of the Harbor Kings needs a package at the marina. Drive it there. No questions, no stops.',
     outro: 'Package delivered. Rook is impressed — and the Kings now know your name.',
     objective: 'Drive to the marina marker',
     reward: 400,
@@ -27,7 +28,7 @@ export const MISSIONS = [
   {
     id: 'borrowed',
     title: 'Mission 2 — Borrowed Wheels',
-    intro: 'The Kings need a Vesper courier car — gold paint, downtown. Take it. Bring it to the safehouse garage.',
+    intro: 'The Kings want a Vesper courier car — gold paint, downtown. Take it, and bring it to the safehouse garage.',
     outro: 'The courier car is theirs now. The Vesper Syndicate will remember this.',
     objective: 'Steal the gold car, then deliver it to the safehouse',
     reward: 600,
@@ -39,7 +40,7 @@ export const MISSIONS = [
   {
     id: 'pursuit',
     title: 'Mission 3 — Hot Pursuit',
-    intro: 'The Meridian Bay PD is on you — three stars and climbing. Lose them. The old park is your hideout.',
+    intro: 'Meridian Bay PD is on you — three stars and climbing. Lose them, then slip away to the old park.',
     outro: 'You ghosted the whole department. Word travels fast in this city.',
     objective: 'Lose the police, then reach the park hideout',
     reward: 900,

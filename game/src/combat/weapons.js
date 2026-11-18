@@ -1,10 +1,10 @@
 // Combat: a pistol with a magazine and reload, a melee swing, tracer
 // lines and hit feedback — plus the gunmen the missions throw at the
-// player, who take cover-less pot-shots back.
+// player, who close in and take pot-shots back.
 
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
-import { range, pick, clamp } from '../util/random.js';
+import { range, clamp } from '../util/random.js';
 
 export class Weapons {
   constructor(scene, camera, rng) {
@@ -16,7 +16,11 @@ export class Weapons {
     this.reloadTimer = 0;
     this.cooldown = 0;
     this.raycaster = new THREE.Raycaster();
-    this.tracerMat = new THREE.LineBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.9 });
+    this.tracerMat = new THREE.LineBasicMaterial({
+      color: 0xffe9a8,
+      transparent: true,
+      opacity: 0.9,
+    });
     this.onShot = null; // () => {} — sound + scare peds
     this.onHit = null; // (kind, target) => {} — wanted, mission kills
   }
@@ -32,7 +36,7 @@ export class Weapons {
       this.reload();
       return null;
     }
-    this.cooldown = CONFIG.combat.fireInterval;
+    this.cooldown = CONFIG.combat.fireGap;
     this.ammo -= 1;
     this.onShot?.();
     const origin = this.camera.position.clone();
@@ -67,7 +71,7 @@ export class Weapons {
     if (hits.length > 0) {
       const h = hits[0];
       end = h.point.clone();
-      hit = this.identifyHit(h.object, ctx);
+      hit = this.identifyHit(h.object);
       if (hit) this.applyHit(hit, ctx, h.point);
     }
     this.showTracer(muzzle, end);
@@ -75,7 +79,7 @@ export class Weapons {
     return hit;
   }
 
-  identifyHit(object, ctx) {
+  identifyHit(object) {
     let o = object;
     while (o) {
       if (o.userData.enemy) return { kind: 'enemy', enemy: o.userData.enemy };
@@ -120,21 +124,27 @@ export class Weapons {
     this.cooldown = 0.45;
     const pp = ctx.playerPos();
     let best = null;
-    let bd = CONFIG.player.punchRange;
+    let bd = CONFIG.player.reach;
     for (const e of ctx.enemies.list) {
       const d = Math.hypot(e.pos.x - pp.x, e.pos.z - pp.z);
-      if (d < bd) { bd = d; best = { kind: 'enemy', enemy: e }; }
+      if (d < bd) {
+        bd = d;
+        best = { kind: 'enemy', enemy: e };
+      }
     }
     if (!best) {
       for (const p of ctx.peds.peds) {
         if (p.state === 'down') continue;
         const d = Math.hypot(p.pos.x - pp.x, p.pos.z - pp.z);
-        if (d < bd) { bd = d; best = { kind: 'ped', ped: p }; }
+        if (d < bd) {
+          bd = d;
+          best = { kind: 'ped', ped: p };
+        }
       }
     }
     if (best) {
       if (best.kind === 'enemy') {
-        const dead = best.enemy.damage(CONFIG.player.punchDamage);
+        const dead = best.enemy.damage(CONFIG.player.punch);
         if (dead) {
           ctx.enemies.remove(best.enemy);
           this.onHit?.('enemy', best.enemy);
@@ -150,7 +160,7 @@ export class Weapons {
   reload() {
     if (this.reloading || this.ammo === CONFIG.combat.magazine) return;
     this.reloading = true;
-    this.reloadTimer = CONFIG.combat.reloadSeconds;
+    this.reloadTimer = CONFIG.combat.reloadTime;
   }
 
   update(dt) {
@@ -173,7 +183,7 @@ export class Enemies {
     this.list = [];
   }
 
-  makeEnemyMesh() {
+  makeGunman() {
     const group = new THREE.Group();
     const vest = new THREE.MeshLambertMaterial({ color: 0x5a2a6a });
     const pants = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
@@ -199,7 +209,7 @@ export class Enemies {
 
   spawn(count, center) {
     for (let i = 0; i < count; i++) {
-      const mesh = this.makeEnemyMesh();
+      const mesh = this.makeGunman();
       const x = center.x + range(this.rng, -16, 16);
       const z = center.z + range(this.rng, -16, 16);
       mesh.position.set(x, 0, z);
@@ -239,15 +249,15 @@ export class Enemies {
       e.mesh.rotation.y = e.heading;
       // Close in if far, hold ground and shoot if near.
       if (dist > 26) {
-        e.pos.x += Math.sin(e.heading) * 4.5 * dt;
-        e.pos.z += Math.cos(e.heading) * 4.5 * dt;
+        e.pos.x += Math.sin(e.heading) * CONFIG.combat.enemyChaseSpeed * dt;
+        e.pos.z += Math.cos(e.heading) * CONFIG.combat.enemyChaseSpeed * dt;
         this.city.collideCircle(e.pos, 0.5);
         e.mesh.position.copy(e.pos);
       }
       e.shootTimer -= dt;
       if (e.shootTimer <= 0 && dist < CONFIG.combat.enemyRange) {
-        e.shootTimer = CONFIG.combat.enemyShotInterval * range(this.rng, 0.8, 1.3);
-        // Inaccurate: only some shots land.
+        e.shootTimer = CONFIG.combat.enemyShotGap * range(this.rng, 0.8, 1.3);
+        // Inaccurate: only some shots land, fewer at range.
         if (this.rng() < clamp(0.38 - dist / 160, 0.1, 0.38)) {
           onShootPlayer?.(CONFIG.combat.enemyDamage);
         }

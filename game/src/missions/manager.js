@@ -4,6 +4,7 @@
 // decoupled from the systems they drive.
 
 import { MISSIONS, ENDINGS } from './story.js';
+import { flatDist } from '../util/random.js';
 
 export class MissionManager {
   constructor(ctx) {
@@ -11,16 +12,14 @@ export class MissionManager {
     this.index = 0; // next mission to play
     this.active = null; // the running mission's runtime state
     this.completed = 0;
-    this.state = 'idle'; // idle | briefing | active | done | failed | story-done
+    this.state = 'idle'; // idle | active | done | failed | story-done
     this.onEvent = null; // (kind, payload) => {} — HUD toasts, sounds
   }
 
   /** The marker the minimap and the 3D beacon should point at, or null. */
   markerPos() {
     if (!this.active) return null;
-    if (this.active.phase === 'choice') {
-      return this.active.choiceTarget ?? null;
-    }
+    if (this.active.phase === 'choice') return this.active.choiceTarget ?? null;
     return this.active.targetPos;
   }
 
@@ -29,13 +28,17 @@ export class MissionManager {
     if (!this.active) return 'Visit the start marker to begin the next mission.';
     const m = this.active.def;
     if (m.type === 'eliminate' || m.type === 'eliminate-choice') {
-      const done = this.active.kills;
-      const total = m.enemies;
-      if (this.active.phase === 'choice') return 'Choose your crew: drive to the gold marker (Harbor Kings) or the purple marker (Vesper)';
-      return `Eliminate the gunmen (${done}/${total})`;
+      if (this.active.phase === 'choice') {
+        return 'Choose your crew: gold marker (Harbor Kings) or purple marker (Vesper)';
+      }
+      return `Eliminate the gunmen (${this.active.kills}/${m.enemies})`;
     }
-    if (m.type === 'steal-deliver' && this.active.phase === 'deliver') return 'Deliver the gold car to the safehouse';
-    if (m.type === 'escape' && this.active.phase === 'hideout') return 'Reach the park hideout';
+    if (m.type === 'steal-deliver' && this.active.phase === 'deliver') {
+      return 'Deliver the gold car to the safehouse';
+    }
+    if (m.type === 'escape' && this.active.phase === 'hideout') {
+      return 'Reach the park hideout';
+    }
     return m.objective;
   }
 
@@ -59,8 +62,7 @@ export class MissionManager {
       ctx.spawnEnemies(def.enemies, targetPos);
     }
     if (def.type === 'steal-deliver') {
-      const car = ctx.spawnMissionCar(targetPos);
-      this.active.missionCar = car;
+      this.active.missionCar = ctx.spawnMissionCar(targetPos);
     }
     ctx.showMarker(targetPos);
     this.onEvent?.('briefing', def);
@@ -75,16 +77,12 @@ export class MissionManager {
     if (m.type === 'reach') return this.complete();
     if (m.type === 'steal-deliver' && a.phase === 'deliver') return this.complete();
     if (m.type === 'escape' && a.phase === 'hideout') return this.complete();
-    if (m.type === 'eliminate-choice' && a.phase === 'choice') {
-      const choice = a.choice === 'harbor' ? 'harbor' : 'vesper';
-      return this.complete(choice);
-    }
   }
 
   /** The player stole the mission car. */
   stoleMissionCar() {
     const a = this.active;
-    if (!a || a.def.type !== 'steal-deliver') return;
+    if (!a || a.def.type !== 'steal-deliver' || a.phase !== 'go') return;
     a.phase = 'deliver';
     a.targetPos = this.ctx.landmarkPos(a.def.deliverTo);
     this.ctx.showMarker(a.targetPos);
@@ -98,19 +96,18 @@ export class MissionManager {
     const m = a.def;
     if (m.type !== 'eliminate' && m.type !== 'eliminate-choice') return;
     a.kills += 1;
-    if (a.kills >= m.enemies) {
-      if (m.type === 'eliminate-choice') {
-        a.phase = 'choice';
-        const harbor = this.ctx.landmarkPos('marina');
-        const vesper = this.ctx.landmarkPos('downtown');
-        // Two choice markers: gold at the marina (Harbor Kings), purple downtown (Vesper).
-        a.choiceMarkers = { harbor, vesper };
-        a.choiceTarget = harbor;
-        this.ctx.showChoiceMarkers(harbor, vesper);
-        this.onEvent?.('objective', 'Choose your crew — gold marker: Harbor Kings, purple marker: Vesper Syndicate');
-      } else {
-        this.complete();
-      }
+    if (a.kills < m.enemies) return;
+    if (m.type === 'eliminate-choice') {
+      a.phase = 'choice';
+      const harbor = this.ctx.landmarkPos('marina');
+      const vesper = this.ctx.landmarkPos('downtown');
+      // Two choice markers: gold at the marina (Harbor Kings), purple downtown (Vesper).
+      a.choiceMarkers = { harbor, vesper };
+      a.choiceTarget = harbor;
+      this.ctx.showChoiceMarkers(harbor, vesper);
+      this.onEvent?.('objective', 'Choose your crew — gold marker: Harbor Kings, purple marker: Vesper Syndicate');
+    } else {
+      this.complete();
     }
   }
 
@@ -153,7 +150,7 @@ export class MissionManager {
     return this.startMission(Math.max(0, this.index));
   }
 
-  /** Skip the briefing and jump straight into the next mission. */
+  /** Jump straight into the next mission. */
   beginNext() {
     if (this.index >= MISSIONS.length) {
       this.state = 'story-done';
@@ -179,9 +176,9 @@ export class MissionManager {
       ctx.showMarker(a.targetPos);
       this.onEvent?.('objective', 'Heat is off — reach the park hideout');
     }
-    // Reach checks: within 9 m of the marker (or in the car, same thing).
+    // Reach checks: within range of the marker (on foot or in the car).
     if (a.targetPos && a.phase !== 'choice') {
-      const d = Math.hypot(playerPos.x - a.targetPos.x, playerPos.z - a.targetPos.z);
+      const d = flatDist(playerPos.x, playerPos.z, a.targetPos.x, a.targetPos.z);
       const radius = a.def.type === 'steal-deliver' && a.phase === 'deliver' ? 12 : 9;
       if (d < radius) {
         if (a.def.type === 'steal-deliver' && a.phase === 'go') {
@@ -193,8 +190,8 @@ export class MissionManager {
     }
     // Choice markers.
     if (a.phase === 'choice' && a.choiceMarkers) {
-      const dh = Math.hypot(playerPos.x - a.choiceMarkers.harbor.x, playerPos.z - a.choiceMarkers.harbor.z);
-      const dv = Math.hypot(playerPos.x - a.choiceMarkers.vesper.x, playerPos.z - a.choiceMarkers.vesper.z);
+      const dh = flatDist(playerPos.x, playerPos.z, a.choiceMarkers.harbor.x, a.choiceMarkers.harbor.z);
+      const dv = flatDist(playerPos.x, playerPos.z, a.choiceMarkers.vesper.x, a.choiceMarkers.vesper.z);
       if (dh < 10) this.atChoiceMarker('harbor');
       else if (dv < 10) this.atChoiceMarker('vesper');
     }

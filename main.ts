@@ -1,24 +1,25 @@
-// Meridian Bay — a make.fun gta6-01 entry (Node 22, standard library only).
+// Meridian Bay — a make.fun gta6-01 entry (Node 22+, standard library only).
 //
 // The entry is the static game in game/: game/index.html plus its ES
 // modules, three.js vendored as a minified build under game/vendor/, and no
 // network request at runtime. This program hands the entry in: it copies
-// game/ and screenshots/ from beside this file into /output and writes
-// /output/dossier.json with the vendored make.fun library, so the judge can
-// read the game, its screenshots, and its source outline.
+// game/ and screenshots/ from beside this file into the output directory
+// and writes dossier.json with the vendored make.fun library, so the judge
+// can read the game, its screenshots, and its source outline.
 //
-// The game itself is an original open-world crime game: a sun-soaked coastal
-// city explored on foot and by car, with traffic and pedestrians, cars to
-// steal and drive, a 1-5 star wanted level with police who chase, a
-// 5-mission story, combat, a HUD with a live minimap, a start screen, pause,
-// and localStorage saves.
+// The game itself is an original open-world crime game: a sun-soaked
+// coastal city explored on foot and by car, with traffic and pedestrians,
+// cars to steal and drive, a 1–5 star wanted level with police who chase,
+// a 5-mission story, combat, a HUD with a live minimap, a start screen,
+// pause, and localStorage saves.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-// v2 (iteration #2): golden-hour lighting, denser city and traffic, closer
-// driving camera, bolder HUD/minimap, and staged ?scene= presets that raise
-// window.__shotReady once the action has settled for screenshots.
+//   MAKEFUN_OUTPUT_DIR=out node main.ts
+// v3 (iteration #3): full rewrite from the design brief — new city layout
+// (64 m grid, pond park, boardwalk, sailboat marina), interception police,
+// ACES tone mapping, bolder HUD/minimap, and staged ?scene= presets that
+// raise window.__shotReady once the action has settled for screenshots.
 
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,7 +32,9 @@ const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
 mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+if (existsSync(join(here, 'screenshots'))) {
+  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+}
 
 // The scorer's own caps (from the competition's gate): only text_max_bytes
 // shapes the bytes the dossier carries; the other caps refuse an entry the

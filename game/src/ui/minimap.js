@@ -1,8 +1,6 @@
-// Live minimap: a 2D canvas top-down view of Meridian Bay — roads, the
-// sea, the player arrow, traffic dots, flashing police dots, and the
-// mission marker. M toggles a large overlay map.
-
-import { CONFIG } from '../config.js';
+// Live minimap: a 2D canvas top-down view of Meridian Bay — the sea, the
+// road grid, the safehouse zone, the player arrow, traffic dots, flashing
+// police dots, and the mission marker. M toggles a large overlay map.
 
 export class Minimap {
   constructor(canvas, city) {
@@ -10,7 +8,7 @@ export class Minimap {
     this.ctx = canvas.getContext('2d');
     this.city = city;
     this.size = canvas.width;
-    this.half = 330; // world units shown from centre to edge
+    this.half = 340; // world units shown from centre to edge
   }
 
   worldToMap(x, z) {
@@ -23,34 +21,46 @@ export class Minimap {
     const g = this.ctx;
     const size = this.size;
     g.clearRect(0, 0, size, size);
-    // Sea + land.
+    // Sea, then land.
     g.fillStyle = '#1f6f7c';
     g.fillRect(0, 0, size, size);
     g.fillStyle = '#5d7a4a';
-    const [bx] = this.worldToMap(-262, 0);
-    g.fillRect(bx, 0, size - bx, size);
-    // Roads.
+    const [shoreX] = this.worldToMap(-278, 0);
+    g.fillRect(shoreX, 0, size - shoreX, size);
+    // Road grid.
     g.strokeStyle = '#3a3f46';
     g.lineWidth = 5;
     for (const c of this.city.roadCoords) {
       const [x] = this.worldToMap(c, 0);
-      g.beginPath(); g.moveTo(x, 0); g.lineTo(x, size); g.stroke();
+      g.beginPath();
+      g.moveTo(x, 0);
+      g.lineTo(x, size);
+      g.stroke();
       const [, z] = this.worldToMap(0, c);
-      g.beginPath(); g.moveTo(0, z); g.lineTo(size, z); g.stroke();
+      g.beginPath();
+      g.moveTo(0, z);
+      g.lineTo(size, z);
+      g.stroke();
     }
-    // Safehouse zone.
+    // Safehouse lay-low zone.
     const sh = this.city.landmarks.safehouse;
     const [shx, shy] = this.worldToMap(sh.x, sh.z);
-    g.fillStyle = 'rgba(80,200,120,0.5)';
-    g.beginPath(); g.arc(shx, shy, 7, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(80, 200, 120, 0.5)';
+    g.beginPath();
+    g.arc(shx, shy, 8, 0, Math.PI * 2);
+    g.fill();
     // Mission marker (pulsing gold diamond).
     if (s.marker) {
       const [mx, my] = this.worldToMap(s.marker.x, s.marker.z);
-      const pulse = 6 + Math.sin(performance.now() / 200) * 2;
+      const pulse = 7 + Math.sin(performance.now() / 200) * 2;
       g.fillStyle = '#ffd23f';
       g.beginPath();
-      g.moveTo(mx, my - pulse); g.lineTo(mx + pulse, my); g.lineTo(mx, my + pulse); g.lineTo(mx - pulse, my);
-      g.closePath(); g.fill();
+      g.moveTo(mx, my - pulse);
+      g.lineTo(mx + pulse, my);
+      g.lineTo(mx, my + pulse);
+      g.lineTo(mx - pulse, my);
+      g.closePath();
+      g.fill();
       g.strokeStyle = '#7a5a00';
       g.lineWidth = 1.5;
       g.stroke();
@@ -61,12 +71,15 @@ export class Minimap {
         const m = s.choiceMarkers[key];
         const [mx, my] = this.worldToMap(m.x, m.z);
         g.fillStyle = color;
-        g.beginPath(); g.arc(mx, my, 6, 0, Math.PI * 2); g.fill();
+        g.beginPath();
+        g.arc(mx, my, 7, 0, Math.PI * 2);
+        g.fill();
         g.strokeStyle = '#111';
+        g.lineWidth = 1.5;
         g.stroke();
       }
     }
-    // Traffic dots — bigger, so the minimap reads at a glance.
+    // Traffic dots.
     g.fillStyle = '#e8e8e8';
     for (const c of s.traffic) {
       const [tx, ty] = this.worldToMap(c.x, c.z);
@@ -77,9 +90,11 @@ export class Minimap {
     g.fillStyle = flashRed ? '#ff3030' : '#3060ff';
     for (const c of s.police) {
       const [px, py] = this.worldToMap(c.x, c.z);
-      g.beginPath(); g.arc(px, py, 4.5, 0, Math.PI * 2); g.fill();
+      g.beginPath();
+      g.arc(px, py, 5, 0, Math.PI * 2);
+      g.fill();
     }
-    // Player arrow — bigger and outlined, the anchor of the map.
+    // Player arrow — big and outlined, the anchor of the map.
     const [px, py] = this.worldToMap(s.player.x, s.player.z);
     g.save();
     g.translate(px, py);
@@ -88,12 +103,17 @@ export class Minimap {
     g.strokeStyle = '#111';
     g.lineWidth = 1.5;
     g.beginPath();
-    g.moveTo(0, -10); g.lineTo(7, 8); g.lineTo(0, 4); g.lineTo(-7, 8);
-    g.closePath(); g.fill(); g.stroke();
+    g.moveTo(0, -11);
+    g.lineTo(8, 9);
+    g.lineTo(0, 4);
+    g.lineTo(-8, 9);
+    g.closePath();
+    g.fill();
+    g.stroke();
     g.restore();
     // North tick.
     g.fillStyle = '#ffffff';
-    g.font = 'bold 11px sans-serif';
-    g.fillText('N', size - 14, 14);
+    g.font = 'bold 12px sans-serif';
+    g.fillText('N', size - 15, 15);
   }
 }
