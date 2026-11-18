@@ -1,115 +1,72 @@
-// HUD: health bar, cash, wanted stars, objective + countdown, speed,
-// ammo, zone label, controls hint, damage flash, and the "press E" prompt.
-// Everything a screenshot needs to read as a complete game, all at once.
-import { fmtTime } from '../util/random.js';
-import { districtAt } from '../config.js';
+/* HUD: health, cash, wanted stars, mission banner + timer,
+   speed, ammo, toasts, and the hurt vignette. */
+(function () {
+  let els = {};
+  let toastTimer = null;
+  let hurtTimer = null;
 
-export function createHud() {
-  const $ = (id) => document.getElementById(id);
-  const el = {
-    root: $('hud'),
-    healthFill: $('health-fill'),
-    healthNum: $('health-num'),
-    cash: $('cash'),
-    stars: $('stars'),
-    objective: $('objective-text'),
-    timer: $('objective-timer'),
-    zone: $('zone-label'),
-    zoneBanner: $('zone-banner'),
-    speed: $('speed'),
-    speedNum: $('speed-num'),
-    ammo: $('ammo'),
-    ammoNum: $('ammo-num'),
-    hint: $('controls-hint'),
-    crosshair: $('crosshair'),
-    prompt: $('prompt'),
-    damage: $('damage-flash'),
-    toast: $('toast'),
-    missionTag: $('mission-tag'),
-  };
-  let lastZone = '';
-  let zoneT = 0;
-  let toastT = 0;
-  let damageT = 0;
-
-  function setStars(n) {
-    let html = '';
-    for (let i = 0; i < 5; i++) {
-      html += `<span class="star ${i < n ? 'lit' : ''}">★</span>`;
-    }
-    el.stars.innerHTML = html;
+  function init() {
+    const ids = ['hud', 'health-bar', 'health-num', 'cash', 'stars', 'mission-name', 'objective',
+      'timer', 'zone-label', 'speed', 'speed-wrap', 'ammo', 'crosshair', 'vignette', 'toast',
+      'wanted-flash', 'controls-hint'];
+    ids.forEach(function (id) { els[id] = document.getElementById(id); });
   }
-  setStars(0);
 
-  return {
-    show() { el.root.style.display = 'block'; },
-    hide() { el.root.style.display = 'none'; },
-    flashDamage() {
-      damageT = 0.5;
-      el.damage.style.opacity = '0.55';
-    },
-    toast(text, seconds = 3) {
-      el.toast.textContent = text;
-      el.toast.style.opacity = '1';
-      toastT = seconds;
-    },
-    update(dt, s) {
-      // Health / cash / stars (top-left).
-      el.healthFill.style.width = Math.max(0, s.health) + '%';
-      el.healthFill.className = 'fill ' + (s.health > 50 ? 'good' : s.health > 25 ? 'warn' : 'bad');
-      el.healthNum.textContent = Math.round(s.health);
-      el.cash.textContent = '$' + s.cash.toLocaleString('en-US');
-      if (el.stars.dataset.n !== String(s.stars)) {
-        el.stars.dataset.n = String(s.stars);
-        setStars(s.stars);
-      }
-      // Objective + timer (top-center). A mission is always on screen.
-      el.objective.textContent = s.objective;
-      if (s.timeLeft > 0) {
-        el.timer.textContent = fmtTime(s.timeLeft);
-        el.timer.style.display = 'block';
-        el.timer.classList.toggle('urgent', s.timeLeft < 30);
-      } else {
-        el.timer.style.display = 'none';
-      }
-      el.missionTag.textContent = s.missionTitle ? `MISSION ${s.missionIndex} · ${s.missionTitle}` : 'FREE ROAM';
-      // Zone label + banner on change.
-      const zone = districtAt(s.x, s.z);
-      el.zone.textContent = zone;
-      if (zone !== lastZone) {
-        lastZone = zone;
-        el.zoneBanner.textContent = zone;
-        el.zoneBanner.style.opacity = '1';
-        zoneT = 2.4;
-      }
-      if (zoneT > 0) {
-        zoneT -= dt;
-        if (zoneT <= 0) el.zoneBanner.style.opacity = '0';
-      }
-      // Speed (bottom-right, driving only) + ammo (always).
-      if (s.driving) {
-        el.speed.style.display = 'block';
-        el.speedNum.textContent = s.speedKmh;
-      } else {
-        el.speed.style.display = 'none';
-      }
-      el.ammoNum.textContent = s.reloading ? 'RELOADING…' : `${s.ammo}/${s.mag}`;
-      el.crosshair.style.display = s.driving ? 'none' : 'block';
-      // Context prompt ("E — Enter car" / "E — Steal car").
-      if (s.prompt) {
-        el.prompt.textContent = s.prompt;
-        el.prompt.style.display = 'block';
-      } else {
-        el.prompt.style.display = 'none';
-      }
-      if (toastT > 0) {
-        toastT -= dt;
-        if (toastT <= 0) el.toast.style.opacity = '0';
-      }
-      if (damageT > 0) {
-        damageT -= dt;
-        el.damage.style.opacity = String(Math.max(0, damageT) * 1.1);
-      }
-    },
-  };
-}
+  function show() { els['hud'].classList.remove('hidden'); }
+  function hide() { els['hud'].classList.add('hidden'); }
+
+  function toast(text, ms) {
+    els['toast'].textContent = text;
+    els['toast'].style.opacity = '1';
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { els['toast'].style.opacity = '0'; }, ms || 2600);
+  }
+
+  function flashHurt() {
+    els['vignette'].classList.add('hurt');
+    if (hurtTimer) clearTimeout(hurtTimer);
+    hurtTimer = setTimeout(function () { els['vignette'].classList.remove('hurt'); }, 350);
+  }
+
+  function showIntro(def) {
+    const idx = MB.S.missionIndex + 1;
+    toast('MISSION ' + idx + ' · ' + def.name + ' — ' + def.intro, 4200);
+  }
+
+  function update() {
+    const S = MB.S;
+    els['health-bar'].style.width = S.health + '%';
+    els['health-bar'].style.background = S.health > 50
+      ? 'linear-gradient(90deg,#37e05a,#8cff6e)'
+      : (S.health > 25 ? 'linear-gradient(90deg,#ffc93c,#ffe27a)' : 'linear-gradient(90deg,#ff3a2e,#ff7a6e)');
+    els['health-num'].textContent = Math.round(S.health);
+    els['cash'].textContent = '$' + S.cash.toLocaleString('en-US');
+    const stars = els['stars'].children;
+    for (let i = 0; i < stars.length; i++) stars[i].classList.toggle('lit', i < S.wanted);
+    els['wanted-flash'].classList.toggle('on', S.wanted >= 3);
+    const rt = MB.Missions.runtime();
+    if (rt) {
+      els['mission-name'].textContent = 'MISSION ' + (rt.index + 1) + ' · ' + rt.def.name;
+      els['objective'].textContent = MB.Missions.objectiveText();
+      els['timer'].textContent = MB.Util.fmtTime(rt.timer);
+      els['timer'].classList.toggle('low', rt.timer < 30);
+      els['timer'].style.display = '';
+      els['mission-name'].style.display = '';
+    } else if (S.freeRoam) {
+      els['mission-name'].textContent = 'FREE ROAM';
+      els['objective'].textContent = 'Free roam — explore Meridian Bay';
+      els['timer'].style.display = 'none';
+    } else {
+      els['mission-name'].textContent = 'MERIDIAN BAY';
+      els['objective'].textContent = 'Story complete — the city is yours';
+      els['timer'].style.display = 'none';
+    }
+    els['zone-label'].textContent = S.zone;
+    els['speed-wrap'].style.display = S.inCar ? '' : 'none';
+    els['speed'].textContent = S.speedKmh;
+    els['ammo'].textContent = 'AMMO ' + S.ammo + '/' + MB.CFG.pistolMag + ' · ' + S.reserveAmmo;
+    els['crosshair'].style.display = S.inCar ? 'none' : '';
+  }
+
+  MB.HUD = { init: init, show: show, hide: hide, update: update, toast: toast, flashHurt: flashHurt, showIntro: showIntro };
+})();

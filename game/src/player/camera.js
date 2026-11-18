@@ -1,63 +1,66 @@
-// Third-person follow camera: orbits with the mouse (or arrow keys),
-// sits higher and further back while driving, pulls in instead of clipping
-// through buildings, and eases back behind the car at speed.
-import { clamp, angleLerp } from '../util/random.js';
+/* Third-person follow camera: mouse-drag orbit, smooth follow,
+   and a pull-in rule so it never clips through buildings. */
+(function () {
+  const CFG = MB.CFG;
+  let yaw = Math.PI, pitch = 0.32;
+  let curDist = 9, curHeight = 4.5;
+  let desiredYaw = null; // scenario override
 
-export function createCamera(camera) {
-  let yaw = Math.PI; // behind the player, looking north
-  let pitch = 0.42;
-  let dist = 9;
-  let shake = 0;
-  let shakeX = 0, shakeY = 0;
+  function yawValue() { return yaw; }
 
-  return {
-    get yaw() { return yaw; },
-    setYaw(y) { yaw = y; },
-    setPitch(p) { pitch = clamp(p, 0.12, 1.25); },
-    setDist(d) { dist = d; },
-    addShake(amount) { shake = Math.min(0.9, shake + amount); },
-    update(input, target, moving, driving, speed, dt, blockers) {
-      const m = input.consumeMouse();
-      yaw -= m.dx * 0.0028;
-      pitch = clamp(pitch + m.dy * 0.0022, 0.12, 1.25);
-      const ok = input.orbitKeys();
-      if (ok !== 0) yaw += ok * 1.9 * dt;
-      // Driving: pull further back and lower; auto-center behind the car.
-      const wantDist = driving ? 11 : 7.5;
-      const wantPitch = driving ? 0.34 : 0.46;
-      dist += (wantDist - dist) * Math.min(1, dt * 2.2);
-      if (Math.abs(speed) > 14 && driving) {
-        yaw = angleLerp(yaw, target.heading + Math.PI, Math.min(1, dt * 1.4));
-      }
-      pitch += (wantPitch - pitch) * Math.min(1, dt * 0.6);
+  function setYaw(y) { yaw = y; desiredYaw = null; }
+  function setPitch(p) { pitch = MB.Util.clamp(p, 0.05, 1.1); }
 
-      const tx = target.x, tz = target.z;
-      const ty = driving ? 1.6 : 1.9;
-      const cx = tx + Math.sin(yaw) * Math.cos(pitch) * dist;
-      const cz = tz + Math.cos(yaw) * Math.cos(pitch) * dist;
-      const cy = ty + Math.sin(pitch) * dist;
+  function update(dt) {
+    const cam = MB.W.camera;
+    if (!cam) return;
+    const d = MB.Input.mouseDelta();
+    yaw -= d.x * 0.005;
+    pitch = MB.Util.clamp(pitch + d.y * 0.003, 0.08, 1.05);
+    const p = MB.W.player;
+    const car = MB.W.currentCar;
+    let tx, tz, ty, targetDist, targetHeight;
+    if (MB.S.inCar && car) {
+      tx = car.pos.x; tz = car.pos.z; ty = 1.6;
+      targetDist = CFG.camCarDist; targetHeight = CFG.camCarHeight;
+      // Driving camera gently swings behind the car's heading.
+      const carYaw = Math.atan2(Math.sin(car.heading), Math.cos(car.heading));
+      let dy = carYaw - yaw;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      if (Math.abs(d.x) < 1) yaw += dy * Math.min(1, dt * 1.4);
+    } else if (p) {
+      tx = p.pos.x; tz = p.pos.z; ty = 1.7;
+      targetDist = CFG.camFootDist; targetHeight = CFG.camFootHeight;
+    } else return;
+    curDist = MB.Util.lerp(curDist, targetDist, Math.min(1, dt * 3));
+    curHeight = MB.Util.lerp(curHeight, targetHeight, Math.min(1, dt * 3));
 
-      // Pull in rather than clip: raycast from target to the wanted spot.
-      let finalDist = dist;
-      if (blockers && blockers.length) {
-        const dir = new THREE.Vector3(cx - tx, cy - ty, cz - tz);
-        const len = dir.length();
-        dir.normalize();
-        const ray = new THREE.Raycaster(new THREE.Vector3(tx, ty, tz), dir, 0.5, len);
-        const hits = ray.intersectObjects(blockers, false);
-        if (hits.length) finalDist = Math.max(2.5, hits[0].distance - 0.6);
-      }
-      const fx = tx + Math.sin(yaw) * Math.cos(pitch) * finalDist;
-      const fz = tz + Math.cos(yaw) * Math.cos(pitch) * finalDist;
-      const fy = ty + Math.sin(pitch) * finalDist;
+    // Pull-in: step the camera toward the target until clear of buildings,
+    // but never closer than 3.2 units — inside the player's head helps no one.
+    let dist = curDist;
+    for (let tries = 0; tries < 6 && dist > 3.2; tries++) {
+      const cx = tx - Math.sin(yaw) * Math.cos(pitch) * dist;
+      const cz = tz - Math.cos(yaw) * Math.cos(pitch) * dist;
+      if (!insideBuilding(cx, cz)) break;
+      dist = Math.max(3.2, dist * 0.72);
+    }
+    const shake = MB.FX.shakeOffset();
+    const cx = tx - Math.sin(yaw) * Math.cos(pitch) * dist + shake.x;
+    const cz = tz - Math.cos(yaw) * Math.cos(pitch) * dist;
+    const cy = ty + Math.sin(pitch) * dist + curHeight * 0.15 + shake.y;
+    cam.position.set(cx, Math.max(1.2, cy), cz);
+    cam.lookAt(tx, ty, tz);
+  }
 
-      // Screen shake decays fast.
-      shake = Math.max(0, shake - dt * 2.4);
-      shakeX = (Math.random() - 0.5) * shake * 0.5;
-      shakeY = (Math.random() - 0.5) * shake * 0.5;
+  function insideBuilding(x, z) {
+    const cols = MB.W.colliders;
+    for (let i = 0; i < cols.length; i++) {
+      const b = cols[i];
+      if (x > b.minX - 0.5 && x < b.maxX + 0.5 && z > b.minZ - 0.5 && z < b.maxZ + 0.5) return true;
+    }
+    return false;
+  }
 
-      camera.position.set(fx + shakeX, Math.max(1.2, fy + shakeY), fz);
-      camera.lookAt(tx, ty + 0.4, tz);
-    },
-  };
-}
+  MB.CameraRig = { update: update, yaw: yawValue, setYaw: setYaw, setPitch: setPitch };
+})();

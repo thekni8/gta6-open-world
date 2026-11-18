@@ -1,67 +1,56 @@
-// Keyboard + mouse input. Tracks held keys, edge-triggered presses, mouse
-// orbit deltas (pointer lock when available, arrow keys as fallback), and
-// the fire button. The game loop consumes presses each frame.
-export function createInput(canvas) {
-  const keys = new Set();
-  const pressed = new Set();
+/* Keyboard + mouse input. Tracks held keys, edge-triggered presses,
+   mouse orbit drag, and click-to-shoot. */
+(function () {
+  const keys = {};
+  const pressed = {};          // true only on the frame the key went down
   let mouseDX = 0, mouseDY = 0;
+  let dragging = false, lastX = 0, lastY = 0;
   let mouseDown = false, mouseClicked = false;
-  let locked = false;
 
-  const onKeyDown = (e) => {
+  window.addEventListener('keydown', function (e) {
     if (e.repeat) return;
-    keys.add(e.code);
-    pressed.add(e.code);
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
-  };
-  const onKeyUp = (e) => keys.delete(e.code);
-  const onMouseMove = (e) => {
-    if (document.pointerLockElement === canvas) {
-      mouseDX += e.movementX;
-      mouseDY += e.movementY;
-    }
-  };
-  const onMouseDown = (e) => {
-    if (e.button === 0) { mouseDown = true; mouseClicked = true; }
-  };
-  const onMouseUp = (e) => { if (e.button === 0) mouseDown = false; };
-  const onLockChange = () => { locked = document.pointerLockElement === canvas; };
-  const onBlur = () => { keys.clear(); mouseDown = false; };
-
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
-  window.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mousedown', onMouseDown);
-  window.addEventListener('mouseup', onMouseUp);
-  document.addEventListener('pointerlockchange', onLockChange);
-  window.addEventListener('blur', onBlur);
-
-  canvas.addEventListener('click', () => {
-    if (document.pointerLockElement !== canvas) {
-      canvas.requestPointerLock?.();
-    }
+    keys[e.code] = true;
+    pressed[e.code] = true;
+    if (['Space', 'ArrowUp', 'ArrowDown'].indexOf(e.code) >= 0) e.preventDefault();
+  });
+  window.addEventListener('keyup', function (e) { keys[e.code] = false; });
+  window.addEventListener('blur', function () {
+    for (const k in keys) keys[k] = false;
+    dragging = false; mouseDown = false;
+  });
+  window.addEventListener('mousedown', function (e) {
+    if (e.target.closest('button') || e.target.closest('.menu-panel')) return;
+    mouseDown = true; mouseClicked = true;
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+  });
+  window.addEventListener('mouseup', function () { mouseDown = false; dragging = false; });
+  window.addEventListener('mousemove', function (e) {
+    if (!dragging) return;
+    mouseDX += e.clientX - lastX;
+    mouseDY += e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
   });
 
-  return {
-    isDown(code) { return keys.has(code); },
-    wasPressed(code) { return pressed.has(code); },
-    axis() {
-      // -1..1 forward / strafe from WASD + arrows
-      const f = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
-      const s = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
-      return { f, s };
+  MB.Input = {
+    isDown: function (code) { return !!keys[code]; },
+    wasPressed: function (code) { return !!pressed[code]; },
+    mouseDelta: function () { const d = { x: mouseDX, y: mouseDY }; mouseDX = 0; mouseDY = 0; return d; },
+    isMouseDown: function () { return mouseDown; },
+    wasClicked: function () { return mouseClicked; },
+    // Forward/back/left/right as -1..1, for feet and wheels alike.
+    axes: function () {
+      let f = 0, s = 0;
+      if (keys['KeyW'] || keys['ArrowUp']) f += 1;
+      if (keys['KeyS'] || keys['ArrowDown']) f -= 1;
+      if (keys['KeyA'] || keys['ArrowLeft']) s -= 1;
+      if (keys['KeyD'] || keys['ArrowRight']) s += 1;
+      return { forward: f, strafe: s };
     },
-    sprint() { return keys.has('ShiftLeft') || keys.has('ShiftRight'); },
-    handbrake() { return keys.has('Space'); },
-    firing() { return mouseDown; },
-    clicked() { return mouseClicked; },
-    consumeMouse() { const d = { dx: mouseDX, dy: mouseDY }; mouseDX = 0; mouseDY = 0; return d; },
-    orbitKeys() {
-      return (keys.has('ArrowLeft') ? 1 : 0) - (keys.has('ArrowRight') ? 1 : 0);
+    endFrame: function () {
+      for (const k in pressed) pressed[k] = false;
+      mouseClicked = false;
     },
-    isLocked() { return locked; },
-    releaseLock() { if (document.pointerLockElement) document.exitPointerLock(); },
-    clear() { pressed.clear(); mouseClicked = false; mouseDown = false; },
-    endFrame() { pressed.clear(); mouseClicked = false; },
+    // Test/scenario helper: pretend a key is held.
+    setKey: function (code, down) { keys[code] = down; if (down) pressed[code] = true; },
   };
-}
+})();

@@ -1,10 +1,9 @@
-// Meridian Bay — make.fun gta6-01 entrypoint (Node 22, standard library
-// only). Hands the game in: copies game/ and screenshots/ from beside this
-// file to /output and writes /output/dossier.json with the vendored
-// make.fun library, exactly as the kit's starter does. Deterministic: the
-// same repository always produces byte-identical output.
+// Meridian Bay — Make GTA 6 (gta6-01) entry program (Node 22, stdlib only).
+// Hands the game in: copies game/ and screenshots/ from beside this file
+// to /output and writes /output/dossier.json with the vendored make.fun
+// library. Deterministic: two runs write identical bytes.
 //
-// Check it locally with:
+// Local check:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -18,12 +17,12 @@ const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
 mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+if (existsSync(join(here, 'screenshots'))) {
+  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+}
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes
-// the bytes; the others refuse an entry the scorer would refuse (more than
-// 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48
-// MiB of game files in all, or a path under game/ over 1000 bytes).
+// The scorer's own caps (reference/gate.json): text_max_bytes shapes the
+// dossier text; the rest refuse an entry the scorer would refuse.
 writeFileSync(
   join(out, 'dossier.json'),
   buildDossier(out, {

@@ -1,79 +1,92 @@
-// Menus: start screen, pause, mission complete / fail, wasted / busted,
-// story complete, and the full-map overlay. DOM overlays; main.js wires
-// each button to the real action.
-export function createMenus(callbacks) {
-  const $ = (id) => document.getElementById(id);
-  const screens = {
-    start: $('screen-start'),
-    pause: $('screen-pause'),
-    complete: $('screen-complete'),
-    fail: $('screen-fail'),
-    end: $('screen-end'),
-    map: $('screen-map'),
-  };
-  let visible = null;
+/* Menus: start screen, pause, mission-complete/fail, big-map overlay.
+   Wires the buttons to the game state machine in main.js. */
+(function () {
+  let els = {};
 
-  function show(name) {
-    for (const k of Object.keys(screens)) {
-      screens[k].style.display = k === name ? 'flex' : 'none';
+  function init() {
+    ['start-screen', 'pause-screen', 'mission-screen', 'bigmap', 'btn-new', 'btn-continue',
+     'btn-freeroam', 'btn-controls', 'controls-box', 'continue-num', 'btn-resume',
+     'btn-restart-mission', 'btn-quit-menu', 'mission-end-title', 'mission-end-text',
+     'mission-end-reward', 'btn-mission-next', 'btn-mission-retry'].forEach(function (id) {
+      els[id] = document.getElementById(id);
+    });
+    const save = MB.Storage.load();
+    if (save && save.missionIndex > 0 && save.missionIndex < MB.Story.missions.length) {
+      els['continue-num'].textContent = save.missionIndex + 1;
+    } else {
+      els['btn-continue'].style.display = 'none';
     }
-    visible = name;
-  }
-  function hideAll() {
-    for (const k of Object.keys(screens)) screens[k].style.display = 'none';
-    visible = null;
+    els['btn-new'].addEventListener('click', function () {
+      MB.Sound.unlock(); MB.Sound.click();
+      MB.Storage.clear();
+      MB.Main.newGame();
+    });
+    els['btn-continue'].addEventListener('click', function () {
+      MB.Sound.unlock(); MB.Sound.click();
+      MB.Main.continueGame();
+    });
+    els['btn-freeroam'].addEventListener('click', function () {
+      MB.Sound.unlock(); MB.Sound.click();
+      MB.Main.freeRoam();
+    });
+    els['btn-controls'].addEventListener('click', function () {
+      MB.Sound.click();
+      els['controls-box'].classList.toggle('hidden');
+    });
+    els['btn-resume'].addEventListener('click', function () { MB.Sound.click(); MB.Main.resume(); });
+    els['btn-restart-mission'].addEventListener('click', function () {
+      MB.Sound.click();
+      MB.Main.resume();
+      MB.Missions.restartMission();
+    });
+    els['btn-quit-menu'].addEventListener('click', function () {
+      MB.Sound.click();
+      MB.Main.quitToMenu();
+    });
+    els['btn-mission-next'].addEventListener('click', function () {
+      MB.Sound.click();
+      hideMissionEnd();
+      MB.Main.afterMissionEnd();
+    });
+    els['btn-mission-retry'].addEventListener('click', function () {
+      MB.Sound.click();
+      hideMissionEnd();
+      MB.Main.resume();
+      MB.Missions.restartMission();
+    });
   }
 
-  $('btn-new').addEventListener('click', () => callbacks.newGame());
-  $('btn-continue').addEventListener('click', () => callbacks.continueGame());
-  $('btn-freeroam').addEventListener('click', () => callbacks.freeRoam());
-  $('btn-resume').addEventListener('click', () => callbacks.resume());
-  $('btn-restart-mission').addEventListener('click', () => callbacks.restartMission());
-  $('btn-save-quit').addEventListener('click', () => callbacks.saveQuit());
-  $('btn-complete-next').addEventListener('click', () => callbacks.nextMission());
-  $('btn-fail-retry').addEventListener('click', () => callbacks.retryMission());
-  $('btn-fail-roam').addEventListener('click', () => callbacks.freeRoamFromFail());
-  $('btn-end-roam').addEventListener('click', () => callbacks.freeRoam());
-  $('btn-map-close').addEventListener('click', () => callbacks.closeMap());
+  function showStart() {
+    els['start-screen'].classList.remove('hidden');
+    els['pause-screen'].classList.add('hidden');
+    els['mission-screen'].classList.add('hidden');
+  }
+  function hideStart() { els['start-screen'].classList.add('hidden'); }
+  function showPause() { els['pause-screen'].classList.remove('hidden'); }
+  function hidePause() { els['pause-screen'].classList.add('hidden'); }
+  function toggleBigMap() {
+    const open = els['bigmap'].classList.toggle('hidden');
+    return !open;
+  }
+  function hideBigMap() { els['bigmap'].classList.add('hidden'); }
 
-  return {
-    get visible() { return visible; },
-    showStart(hasSave, cash, mission) {
-      $('btn-continue').style.display = hasSave ? 'block' : 'none';
-      $('save-line').textContent = hasSave
-        ? `Continue — $${cash.toLocaleString('en-US')} · Mission ${mission} of 5`
-        : 'No save yet — start the story.';
-      show('start');
-    },
-    showPause(missionTitle) {
-      $('pause-mission').textContent = missionTitle ? `Current mission: ${missionTitle}` : 'Free roam';
-      show('pause');
-    },
-    showComplete(def, cash) {
-      $('complete-title').textContent = `Mission complete: ${def.title}`;
-      $('complete-reward').textContent = `+$${def.reward.toLocaleString('en-US')}`;
-      $('complete-cash').textContent = `Total cash: $${cash.toLocaleString('en-US')}`;
-      $('complete-outro').textContent = def.outro;
-      $('btn-complete-next').textContent = def.id >= 5 ? 'Finish the story' : 'Next mission';
-      show('complete');
-    },
-    showFail(def, reason) {
-      $('fail-title').textContent = `${def.title} — failed`;
-      $('fail-reason').textContent = reason;
-      show('fail');
-    },
-    showWasted(kind) {
-      $('fail-title').textContent = kind === 'busted' ? 'BUSTED' : 'WASTED';
-      $('fail-reason').textContent = kind === 'busted'
-        ? 'The Meridian Bay PD caught up with you.'
-        : 'Kai Mercer went down. The city moves on — but the story doesn\'t have to end here.';
-      show('fail');
-    },
-    showEnd(cash) {
-      $('end-cash').textContent = `Final cash: $${cash.toLocaleString('en-US')}`;
-      show('end');
-    },
-    showMap() { show('map'); },
-    hideAll,
+  function showMissionEnd(won, title, text, reward) {
+    els['mission-end-title'].textContent = won ? 'MISSION COMPLETE' : 'MISSION FAILED';
+    els['mission-end-title'].style.color = won ? '#7dff9a' : '#ff7a6e';
+    els['mission-end-text'].textContent = title + (text ? ' ' + text : '');
+    els['mission-end-reward'].textContent = reward || '';
+    els['btn-mission-next'].textContent = won ? 'CONTINUE' : 'BACK TO THE CITY';
+    els['btn-mission-retry'].classList.toggle('hidden', won);
+    els['mission-screen'].classList.remove('hidden');
+    MB.S.mode = 'missionEnd';
+  }
+  function hideMissionEnd() { els['mission-screen'].classList.add('hidden'); }
+
+  MB.Menus = {
+    init: init,
+    showStart: showStart, hideStart: hideStart,
+    showPause: showPause, hidePause: hidePause,
+    toggleBigMap: toggleBigMap, hideBigMap: hideBigMap,
+    showMissionEnd: showMissionEnd, hideMissionEnd: hideMissionEnd,
   };
-}
+})();

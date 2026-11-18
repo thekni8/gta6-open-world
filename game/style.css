@@ -1,0 +1,86 @@
+/* Meridian Bay — HUD and menu styling. Big, high-contrast, readable at a glance. */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1e2e; }
+body { font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: #fff; }
+canvas { display: block; }
+.hidden { display: none !important; }
+#game-root { position: fixed; inset: 0; }
+#game-root canvas { width: 100% !important; height: 100% !important; }
+
+/* ---------- HUD ---------- */
+#hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+#hud-topleft { position: absolute; top: 14px; left: 16px; }
+#health-wrap { position: relative; width: 260px; height: 20px; background: rgba(0,0,0,.55);
+  border: 2px solid rgba(255,255,255,.75); border-radius: 10px; overflow: hidden; }
+#health-bar { height: 100%; width: 100%; background: linear-gradient(90deg,#37e05a,#8cff6e); transition: width .2s; }
+#health-num { position: absolute; left: 8px; top: 0; line-height: 17px; font-size: 13px; font-weight: 700;
+  color: #fff; text-shadow: 0 1px 2px #000; }
+#cash { margin-top: 6px; font-size: 34px; font-weight: 800; color: #7dff9a;
+  text-shadow: 0 2px 4px rgba(0,0,0,.8); letter-spacing: .5px; }
+#stars { margin-top: 2px; font-size: 30px; letter-spacing: 3px; line-height: 1; }
+#stars .star { color: rgba(255,255,255,.28); text-shadow: 0 2px 4px rgba(0,0,0,.8); }
+#stars .star.lit { color: #ffc93c; }
+
+#hud-topcenter { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; }
+#mission-name { font-size: 14px; font-weight: 800; letter-spacing: 3px; color: #ffd23c;
+  text-shadow: 0 2px 4px rgba(0,0,0,.9); text-transform: uppercase; }
+#objective { display: inline-block; margin-top: 4px; padding: 8px 20px; font-size: 22px; font-weight: 700;
+  background: rgba(10,20,32,.78); border-left: 5px solid #ffc93c; border-radius: 6px;
+  box-shadow: 0 3px 10px rgba(0,0,0,.45); }
+#timer { margin-top: 4px; font-size: 38px; font-weight: 800; color: #fff;
+  text-shadow: 0 2px 6px rgba(0,0,0,.9); }
+#timer.low { color: #ff5a4e; animation: pulse .5s infinite alternate; }
+@keyframes pulse { from { transform: scale(1); } to { transform: scale(1.12); } }
+
+#hud-topright { position: absolute; top: 12px; right: 14px; text-align: center; }
+#minimap { width: 220px; height: 220px; border-radius: 50%; border: 4px solid rgba(255,255,255,.9);
+  box-shadow: 0 4px 18px rgba(0,0,0,.55); background: #69c24a; }
+#zone-label { margin-top: 6px; font-size: 15px; font-weight: 800; letter-spacing: 2.5px;
+  text-shadow: 0 2px 4px rgba(0,0,0,.9); }
+
+#hud-bottomright { position: absolute; right: 18px; bottom: 46px; text-align: right; }
+#speed-wrap { font-size: 44px; font-weight: 800; text-shadow: 0 2px 6px rgba(0,0,0,.9); line-height: 1; }
+#speed-unit { font-size: 18px; font-weight: 600; }
+#ammo { margin-top: 4px; font-size: 22px; font-weight: 800; text-shadow: 0 2px 4px rgba(0,0,0,.9); }
+#controls-hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+  font-size: 15px; color: rgba(255,255,255,.92); text-shadow: 0 1px 3px #000; white-space: nowrap; }
+#crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  font-size: 30px; font-weight: 700; color: #fff; text-shadow: 0 0 4px #000, 0 1px 2px #000; }
+#vignette { position: absolute; inset: 0; box-shadow: inset 0 0 120px rgba(255,0,0,0); transition: box-shadow .15s; }
+#vignette.hurt { box-shadow: inset 0 0 140px rgba(255,20,10,.65); }
+#toast { position: absolute; top: 24%; left: 50%; transform: translateX(-50%); font-size: 26px; font-weight: 800;
+  color: #ffe27a; text-shadow: 0 2px 6px rgba(0,0,0,.9); opacity: 0; transition: opacity .3s; text-align: center; }
+#wanted-flash { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(40,80,255,.28) 100%);
+  opacity: 0; }
+#wanted-flash.on { animation: copflash .5s infinite alternate; }
+@keyframes copflash { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---------- Big map ---------- */
+#bigmap { position: fixed; inset: 0; background: rgba(5,15,25,.82); z-index: 20; text-align: center; padding-top: 30px; }
+#bigmap-title { font-size: 30px; font-weight: 800; letter-spacing: 6px; margin-bottom: 10px; }
+#bigmap-canvas { border: 4px solid #fff; border-radius: 8px; margin: 0 auto; background: #69c24a; }
+#bigmap-hint { margin-top: 10px; font-size: 15px; color: #cfe6ff; }
+
+/* ---------- Menus ---------- */
+#start-screen, #pause-screen, #mission-screen { position: fixed; inset: 0; z-index: 30;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(160deg, rgba(8,32,52,.88), rgba(20,60,80,.72) 55%, rgba(255,150,60,.28)); }
+.menu-panel { text-align: center; max-width: 640px; padding: 34px 44px; background: rgba(6,18,30,.72);
+  border: 2px solid rgba(255,255,255,.22); border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
+.menu-panel.small { padding: 28px 40px; }
+.game-title { font-size: 64px; font-weight: 900; letter-spacing: 4px;
+  background: linear-gradient(180deg,#fff8d6,#ffc93c 55%,#ff8a3c); -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; text-shadow: 0 4px 18px rgba(0,0,0,.35); line-height: 1.05; }
+.game-title.small { font-size: 44px; }
+.game-subtitle { margin-top: 6px; font-size: 19px; letter-spacing: 2px; color: #bfe8ff; font-weight: 600; }
+.game-tagline { margin: 14px 0 22px; font-size: 17px; line-height: 1.5; color: #e8f4ff; }
+.menu-btn { display: block; width: 340px; margin: 9px auto; padding: 13px 0; font-size: 19px; font-weight: 800;
+  letter-spacing: 1.5px; color: #fff; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.5);
+  border-radius: 9px; cursor: pointer; transition: all .15s; }
+.menu-btn:hover { background: rgba(255,255,255,.24); transform: translateY(-1px); }
+.menu-btn.primary { background: linear-gradient(180deg,#ffb03c,#ff7a1a); border-color: #ffd27a; color: #201300; }
+.menu-btn.primary:hover { filter: brightness(1.1); }
+#controls-box { margin: 14px auto 6px; padding: 12px 16px; background: rgba(0,0,0,.4); border-radius: 8px;
+  font-size: 15px; line-height: 1.9; text-align: left; }
+.menu-foot { margin-top: 16px; font-size: 13px; color: rgba(255,255,255,.65); }
+.reward-line { margin: 10px 0 18px; font-size: 26px; font-weight: 800; color: #7dff9a; }

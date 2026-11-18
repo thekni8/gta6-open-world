@@ -1,149 +1,108 @@
-// Traffic: cars that drive the street grid in lanes, turn at intersections,
-// slow for the car ahead, and stop for the player in the way. Parked cars
-// (stealable) are spawned here too — the city needs something to steal.
-import { CFG } from '../config.js';
-import { makeRng, clamp } from '../util/random.js';
-import { createCar } from './cars.js';
+/* Traffic AI: cars cruise the road grid, turn at intersections,
+   brake for the car ahead, and stop when the player blocks the road.
+   Parked cars line the curbs for stealing. */
+(function () {
+  const CFG = MB.CFG;
 
-export function createTraffic(scene, city, rngSeed = 777) {
-  const rng = makeRng(rngSeed);
-  const cars = [];
-  const parked = [];
-
-  function spawnTrafficCar() {
-    const p = city.randomRoadPoint(rng);
-    const vertical = Math.abs(p.x % 40) < 1 || rng.chance(0.5);
-    const type = rng.pick(['sedan', 'sedan', 'sedan', 'taxi', 'truck', 'sports']);
-    const car = createCar(scene, {
-      type, color: rng.pick(CFG.carColors), role: 'traffic',
-      x: p.x, z: p.z, heading: 0,
-    });
-    const alongX = rng.chance(0.5);
-    const dir = rng.sign();
-    car.lane = { alongX, dir, street: alongX ? p.z : p.x };
-    car.cruise = CFG.trafficSpeed * rng.range(0.8, 1.15);
-    car.wait = 0;
-    // Snap onto the lane: offset 3.5 to the right of travel.
-    if (alongX) {
-      car.setPos(p.x, car.lane.street + (dir > 0 ? 3.5 : -3.5) * -1);
-      car.setHeading(dir > 0 ? Math.PI / 2 : -Math.PI / 2);
-    } else {
-      car.setPos(car.lane.street + (dir > 0 ? -3.5 : 3.5), p.z);
-      car.setHeading(dir > 0 ? 0 : Math.PI);
+  function spawnTraffic() {
+    const rng = MB.Random.makeRng(4242);
+    for (let i = 0; i < CFG.trafficCount; i++) {
+      const vertical = rng.chance(0.5);
+      const line = rng.pick(CFG.roadLines);
+      const along = rng.range(-220, 220);
+      const dir = rng.chance(0.5) ? 1 : -1;
+      const x = vertical ? line + (dir > 0 ? 3.1 : -3.1) : along;
+      const z = vertical ? along : line + (dir > 0 ? -3.1 : 3.1);
+      const heading = vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+      const car = MB.Cars.createCar(x, z, heading, { taxi: rng.chance(0.12) });
+      car.ai = {
+        kind: 'traffic',
+        vertical: vertical,
+        line: line,
+        dir: dir,
+        speed: CFG.trafficSpeed * rng.range(0.8, 1.15),
+        wait: 0,
+      };
+      car.speed = car.ai.speed;
+      MB.W.roadCars.push(car);
     }
-    cars.push(car);
-    return car;
+    // Parked cars along curbs — the stealable fleet.
+    for (let i = 0; i < 14; i++) {
+      const line = rng.pick(CFG.roadLines);
+      const along = rng.range(-200, 200);
+      const side = rng.chance(0.5) ? 1 : -1;
+      const vertical = rng.chance(0.5);
+      const x = vertical ? line + side * 5.2 : along;
+      const z = vertical ? along : line + side * 5.2;
+      if (x > CFG.beachX - 4 || z < CFG.portZ + 4) continue;
+      const car = MB.Cars.createCar(x, z, vertical ? 0 : Math.PI / 2, { parked: true });
+      MB.W.roadCars.push(car);
+    }
   }
 
-  for (let i = 0; i < CFG.trafficCount; i++) spawnTrafficCar();
-
-  // Parked cars along curbs — the player's first ride is always nearby.
-  for (let i = 0; i < 12; i++) {
-    const p = city.randomRoadPoint(rng);
-    const alongX = rng.chance(0.5);
-    const car = createCar(scene, {
-      type: rng.pick(['sedan', 'sedan', 'sports', 'taxi']),
-      color: rng.pick(CFG.carColors), role: 'parked',
-      x: 0, z: 0,
-    });
-    if (alongX) {
-      car.setPos(p.x, Math.round(p.z / 40) * 40 + rng.pick([-5.6, 5.6]));
-      car.setHeading(rng.chance(0.5) ? Math.PI / 2 : -Math.PI / 2);
-    } else {
-      car.setPos(Math.round(p.x / 40) * 40 + rng.pick([-5.6, 5.6]), p.z);
-      car.setHeading(rng.chance(0.5) ? 0 : Math.PI);
-    }
-    parked.push(car);
-  }
-
-  function carAhead(car, others, playerCar) {
+  function carAhead(car, look) {
     const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
-    let best = 26;
-    const check = (o) => {
-      if (o === car) return;
-      const dx = o.x - car.x, dz = o.z - car.z;
+    let best = Infinity;
+    const all = MB.W.roadCars.concat(MB.W.cops);
+    for (let i = 0; i < all.length; i++) {
+      const o = all[i];
+      if (o === car) continue;
+      const dx = o.pos.x - car.pos.x, dz = o.pos.z - car.pos.z;
       const along = dx * fx + dz * fz;
-      if (along < 0 || along > best) return;
       const side = Math.abs(dx * fz - dz * fx);
-      if (side < 2.6) best = along;
-    };
-    for (const o of others) check(o);
-    if (playerCar) check(playerCar);
+      if (along > 0 && along < look && side < 2.4) best = Math.min(best, along);
+    }
+    // The player on foot also blocks traffic.
+    if (!MB.S.inCar && MB.W.player) {
+      const p = MB.W.player.pos;
+      const dx = p.x - car.pos.x, dz = p.z - car.pos.z;
+      const along = dx * fx + dz * fz;
+      const side = Math.abs(dx * fz - dz * fx);
+      if (along > 0 && along < look && side < 2.2) best = Math.min(best, along);
+    }
     return best;
   }
 
-  return {
-    cars,
-    parked,
-    all() { return cars.concat(parked); },
-    update(dt, playerCar, playerPos, policeCars) {
-      const others = cars.concat(parked, policeCars || []);
-      for (const car of cars) {
-        // Maybe turn at an intersection (street crossing every 40 units).
-        const nearX = Math.abs(car.x - Math.round(car.x / 40) * 40) < 1.2;
-        const nearZ = Math.abs(car.z - Math.round(car.z / 40) * 40) < 1.2;
-        if ((nearX || nearZ) && car.wait <= 0 && rng.chance(dt * 0.5)) {
-          car.lane.alongX = !car.lane.alongX;
-          car.lane.dir = rng.sign();
-          if (car.lane.alongX) {
-            car.lane.street = Math.round(car.z / 40) * 40;
-            car.setHeading(car.lane.dir > 0 ? Math.PI / 2 : -Math.PI / 2);
-          } else {
-            car.lane.street = Math.round(car.x / 40) * 40;
-            car.setHeading(car.lane.dir > 0 ? 0 : Math.PI);
-          }
-          car.wait = 1.5;
-        }
-        car.wait = Math.max(0, car.wait - dt);
-        // Slow down for whatever is ahead, including the player on foot.
-        const gap = carAhead(car, others, playerCar);
-        let want = car.cruise;
-        if (gap < 12) want = car.cruise * clamp((gap - 4) / 8, 0, 1);
-        if (playerPos && !playerCar) {
-          const dx = playerPos.x - car.x, dz = playerPos.z - car.z;
-          const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
-          const along = dx * fx + dz * fz;
-          const side = Math.abs(dx * fz - dz * fx);
-          if (along > 0 && along < 9 && side < 2.2) want = 0;
-        }
-        car.speed += (want - car.speed) * Math.min(1, dt * 1.8);
-        const nx = car.x + Math.sin(car.heading) * car.speed * dt;
-        const nz = car.z + Math.cos(car.heading) * car.speed * dt;
-        // Stay in the lane: ease back to the lane line.
-        let lx = nx, lz = nz;
-        if (car.lane.alongX) {
-          const laneZ = car.lane.street + (car.lane.dir > 0 ? -3.5 : 3.5);
-          lz = nz + (laneZ - nz) * Math.min(1, dt * 2);
-        } else {
-          const laneX = car.lane.street + (car.lane.dir > 0 ? -3.5 : 3.5);
-          lx = nx + (laneX - nx) * Math.min(1, dt * 2);
-        }
-        const fixed = city.resolveCircle(lx, lz, CFG.carRadius);
-        car.setPos(fixed.x, fixed.z);
-        // Wrap around the edge: a car that leaves the grid re-enters elsewhere.
-        if (Math.abs(car.x) > 215 || Math.abs(car.z) > 215) {
-          const p = city.randomRoadPoint(rng);
-          car.setPos(p.x, p.z);
-          car.lane.alongX = rng.chance(0.5);
-          car.lane.dir = rng.sign();
-          car.lane.street = car.lane.alongX ? p.z : p.x;
-        }
-        // Wheel spin
-        for (const w of car.group.userData.wheels) w.rotation.x += (car.speed * dt) / 0.42;
+  function update(dt) {
+    for (let i = 0; i < MB.W.roadCars.length; i++) {
+      const car = MB.W.roadCars[i];
+      const ai = car.ai;
+      if (!ai || ai.kind !== 'traffic') continue;
+      if (car.dead) { car.speed = Math.max(0, car.speed - 20 * dt); MB.Cars.syncMesh(car, dt); continue; }
+      // Intersection? Maybe turn onto the cross street.
+      const along = ai.vertical ? car.pos.z : car.pos.x;
+      const nearest = MB.City.nearestRoadLine(along);
+      if (Math.abs(along - nearest) < 1.2 && !ai.turnedAt && Math.random() < 0.35) {
+        ai.turnedAt = nearest;
+        const newDir = Math.random() < 0.5 ? 1 : -1;
+        const wasVertical = ai.vertical;
+        ai.vertical = !wasVertical;
+        ai.dir = newDir;
+        ai.line = nearest;
+        car.heading = ai.vertical ? (newDir > 0 ? 0 : Math.PI) : (newDir > 0 ? Math.PI / 2 : -Math.PI / 2);
       }
-    },
-    nearestParked(x, z, maxD) {
-      let best = null, bd = maxD;
-      for (const c of parked) {
-        const d = Math.hypot(c.x - x, c.z - z);
-        if (d < bd) { bd = d; best = c; }
+      if (ai.turnedAt !== undefined && Math.abs(along - ai.turnedAt) > 8) ai.turnedAt = undefined;
+      // Brake for the car ahead.
+      const gap = carAhead(car, 13);
+      let target = ai.speed;
+      if (gap < 13) target = gap < 5 ? 0 : ai.speed * (gap - 5) / 8;
+      car.speed = MB.Util.lerp(car.speed, target, Math.min(1, dt * 2.5));
+      // Stay glued to the lane.
+      const laneOff = ai.dir > 0 ? 3.1 : -3.1;
+      if (ai.vertical) car.pos.x = MB.Util.lerp(car.pos.x, ai.line + laneOff, Math.min(1, dt * 3));
+      else car.pos.z = MB.Util.lerp(car.pos.z, ai.line - laneOff, Math.min(1, dt * 3));
+      const nx = car.pos.x + Math.sin(car.heading) * car.speed * dt;
+      const nz = car.pos.z + Math.cos(car.heading) * car.speed * dt;
+      // Wrap around the map edge: recycle to the far side.
+      if (nx > 232 || nx < -232 || nz > 232 || nz < -232) {
+        car.pos.x = -car.pos.x * 0.96;
+        car.pos.z = -car.pos.z * 0.96;
+      } else {
+        car.pos.x = nx; car.pos.z = nz;
       }
-      return best;
-    },
-    claimParked(car) {
-      const i = parked.indexOf(car);
-      if (i >= 0) parked.splice(i, 1);
-      car.role = 'player';
-    },
-  };
-}
+      MB.Cars.syncMesh(car, dt);
+    }
+  }
+
+  MB.Traffic = { spawnTraffic: spawnTraffic, update: update };
+})();

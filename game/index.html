@@ -3,195 +3,112 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
 <title>Meridian Bay — Open-World Crime Game</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0e14;
-    font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: #fff; }
-  #game-container { position: fixed; inset: 0; }
-  #game-container canvas { display: block; }
-
-  /* ---------- HUD ---------- */
-  #hud { display: none; position: fixed; inset: 0; pointer-events: none; z-index: 5;
-    text-shadow: 0 2px 4px rgba(0,0,0,.7); }
-  .hud-topleft { position: absolute; top: 16px; left: 18px; }
-  .health-bar { width: 250px; height: 18px; background: rgba(0,0,0,.55); border-radius: 9px;
-    overflow: hidden; border: 1px solid rgba(255,255,255,.35); }
-  .health-bar .fill { height: 100%; border-radius: 9px; transition: width .15s; }
-  .health-bar .fill.good { background: linear-gradient(90deg, #37d05a, #8bf0a0); }
-  .health-bar .fill.warn { background: linear-gradient(90deg, #e8a020, #f2c230); }
-  .health-bar .fill.bad { background: linear-gradient(90deg, #d83030, #ff7070); }
-  #health-num { font-size: 15px; font-weight: 700; margin-top: 2px; }
-  #cash { font-size: 32px; font-weight: 800; color: #7dff9a; margin-top: 2px; letter-spacing: .5px; }
-  #stars { font-size: 26px; letter-spacing: 3px; margin-top: 2px; }
-  #stars .star { color: rgba(255,255,255,.28); }
-  #stars .star.lit { color: #ffc832; }
-
-  .hud-topcenter { position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
-    text-align: center; }
-  #mission-tag { font-size: 12px; font-weight: 800; letter-spacing: 3px; color: #ffc832;
-    margin-bottom: 5px; }
-  #objective-text { display: inline-block; background: rgba(10,14,20,.72); border-left: 5px solid #ffc832;
-    border-radius: 8px; padding: 10px 18px; font-size: 20px; font-weight: 700; }
-  #objective-timer { font-size: 34px; font-weight: 800; margin-top: 4px; }
-  #objective-timer.urgent { color: #ff5a5a; animation: pulse .5s infinite alternate; }
-  @keyframes pulse { from { transform: scale(1); } to { transform: scale(1.08); } }
-
-  .hud-topright { position: absolute; top: 14px; right: 16px; text-align: center; }
-  #minimap { width: 240px; height: 240px; border-radius: 50%;
-    border: 3px solid rgba(255,255,255,.85); box-shadow: 0 4px 18px rgba(0,0,0,.5); }
-  #zone-label { font-size: 15px; font-weight: 800; letter-spacing: 2px; margin-top: 6px; }
-
-  .hud-bottomright { position: absolute; right: 20px; bottom: 18px; text-align: right; }
-  #speed { font-size: 44px; font-weight: 800; line-height: 1; }
-  #speed .unit { font-size: 19px; font-weight: 700; }
-  #ammo { font-size: 21px; font-weight: 800; margin-top: 6px; }
-  #controls-hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
-    font-size: 14px; color: rgba(255,255,255,.85); white-space: nowrap; }
-  #crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    font-size: 26px; font-weight: 300; color: #fff; }
-  #prompt { display: none; position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%);
-    background: rgba(10,14,20,.8); border: 1px solid #ffc832; border-radius: 8px;
-    padding: 9px 16px; font-size: 18px; font-weight: 700; }
-  #zone-banner { position: absolute; top: 24%; left: 50%; transform: translateX(-50%);
-    font-size: 46px; font-weight: 900; letter-spacing: 6px; opacity: 0;
-    transition: opacity .6s; white-space: nowrap; }
-  #toast { position: absolute; top: 31%; left: 50%; transform: translateX(-50%);
-    background: rgba(10,14,20,.78); border-radius: 8px; padding: 11px 20px;
-    font-size: 19px; font-weight: 600; opacity: 0; transition: opacity .4s;
-    max-width: 80%; text-align: center; }
-  #damage-flash { position: absolute; inset: 0; opacity: 0; pointer-events: none;
-    background: radial-gradient(ellipse at center, transparent 55%, rgba(255,0,0,.55) 100%); }
-
-  /* ---------- Menus ---------- */
-  .screen { display: none; position: fixed; inset: 0; z-index: 10;
-    flex-direction: column; align-items: center; justify-content: center; text-align: center;
-    background: linear-gradient(160deg, rgba(8,20,38,.88), rgba(20,60,90,.82)); }
-  .screen h1 { font-size: 72px; font-weight: 900; letter-spacing: 4px;
-    background: linear-gradient(180deg, #ffe98a, #ff9a3d); -webkit-background-clip: text;
-    background-clip: text; color: transparent; }
-  .screen h2 { font-size: 34px; font-weight: 800; margin-bottom: 10px; }
-  .screen .tagline { font-size: 19px; color: #cfe8ff; margin: 6px 0 26px; max-width: 620px; }
-  .screen p { font-size: 17px; color: #d8e8f8; margin: 6px 0; max-width: 640px; }
-  .btn { display: block; width: 320px; margin: 7px auto; padding: 14px 20px;
-    font-size: 19px; font-weight: 800; letter-spacing: 1px; color: #10202f;
-    background: linear-gradient(180deg, #ffd94d, #f2a81c); border: none; border-radius: 10px;
-    cursor: pointer; box-shadow: 0 4px 0 #a86e00; }
-  .btn:hover { filter: brightness(1.08); }
-  .btn:active { transform: translateY(2px); box-shadow: 0 2px 0 #a86e00; }
-  .btn.secondary { background: linear-gradient(180deg, #3d5a75, #2a4258); color: #fff;
-    box-shadow: 0 4px 0 #16283a; }
-  .controls-grid { display: grid; grid-template-columns: auto auto; gap: 4px 22px;
-    text-align: left; font-size: 15px; color: #cfe0f0; margin: 18px 0 4px; }
-  .controls-grid b { color: #ffd94d; }
-  #save-line { color: #9fd8a8; font-size: 16px; margin-bottom: 10px; }
-  #complete-reward { font-size: 52px; font-weight: 900; color: #7dff9a; margin: 10px 0; }
-  #fail-title.wasted { color: #ff5a5a; }
-  #map-canvas { width: 640px; height: 640px; max-width: 86vmin; max-height: 86vmin;
-    border: 3px solid rgba(255,255,255,.8); border-radius: 12px; }
-  .small { font-size: 13px; color: rgba(255,255,255,.55); margin-top: 22px; }
-</style>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="game-container"></div>
+<div id="game-root"></div>
 
-<!-- HUD -->
-<div id="hud">
-  <div id="damage-flash"></div>
-  <div class="hud-topleft">
-    <div class="health-bar"><div class="fill good" id="health-fill" style="width:100%"></div></div>
-    <div id="health-num">100</div>
+<!-- ============ HUD ============ -->
+<div id="hud" class="hidden">
+  <div id="hud-topleft">
+    <div id="health-wrap"><div id="health-bar"></div><span id="health-num">100</span></div>
     <div id="cash">$200</div>
-    <div id="stars" data-n="0"></div>
+    <div id="stars"><span class="star">★</span><span class="star">★</span><span class="star">★</span><span class="star">★</span><span class="star">★</span></div>
   </div>
-  <div class="hud-topcenter">
-    <div id="mission-tag">FREE ROAM</div>
-    <div id="objective-text">Free roam — explore Meridian Bay</div>
-    <div id="objective-timer" style="display:none">4:00</div>
+  <div id="hud-topcenter">
+    <div id="mission-name">MISSION 1 · Harbor Run</div>
+    <div id="objective">Get in the delivery car</div>
+    <div id="timer">3:00</div>
   </div>
-  <div class="hud-topright">
-    <canvas id="minimap" width="240" height="240"></canvas>
-    <div id="zone-label">MERIDIAN BAY</div>
+  <div id="hud-topright">
+    <canvas id="minimap" width="220" height="220"></canvas>
+    <div id="zone-label">DOWNTOWN</div>
   </div>
-  <div class="hud-bottomright">
-    <div id="speed" style="display:none"><span id="speed-num">0</span> <span class="unit">km/h</span></div>
-    <div id="ammo">AMMO <span id="ammo-num">12/12</span></div>
+  <div id="hud-bottomright">
+    <div id="speed-wrap"><span id="speed">0</span><span id="speed-unit"> km/h</span></div>
+    <div id="ammo">AMMO 12/12</div>
   </div>
   <div id="controls-hint">WASD move/drive · E enter car · LMB shoot · Q punch · R reload · F lights · M map · Esc pause</div>
   <div id="crosshair">+</div>
-  <div id="prompt"></div>
-  <div id="zone-banner"></div>
+  <div id="vignette"></div>
   <div id="toast"></div>
+  <div id="wanted-flash"></div>
 </div>
 
-<!-- Start screen -->
-<div class="screen" id="screen-start">
-  <h1>MERIDIAN BAY</h1>
-  <div class="tagline">A sun-soaked coastal city. Two crews at war. One driver caught in the middle.<br>
-  Steal cars, outrun the police, and pick a side — Kai Mercer's story starts here.</div>
-  <div id="save-line"></div>
-  <button class="btn" id="btn-new">▶ NEW GAME</button>
-  <button class="btn secondary" id="btn-continue">CONTINUE</button>
-  <button class="btn secondary" id="btn-freeroam">FREE ROAM</button>
-  <div class="controls-grid">
-    <span><b>WASD</b> move / drive</span><span><b>Mouse</b> orbit camera</span>
-    <span><b>Shift</b> sprint</span><span><b>E</b> enter / exit car</span>
-    <span><b>LMB</b> shoot pistol</span><span><b>Q</b> punch</span>
-    <span><b>R</b> reload</span><span><b>Space</b> handbrake</span>
-    <span><b>F</b> headlights</span><span><b>M</b> map · <b>Esc</b> pause</span>
-  </div>
-  <div class="small">An original game — no real gangs, no borrowed names. Headphones recommended.</div>
+<!-- ============ Big map overlay ============ -->
+<div id="bigmap" class="hidden">
+  <div id="bigmap-title">MERIDIAN BAY</div>
+  <canvas id="bigmap-canvas" width="640" height="640"></canvas>
+  <div id="bigmap-hint">M or Esc to close</div>
 </div>
 
-<!-- Pause -->
-<div class="screen" id="screen-pause">
-  <h2>PAUSED</h2>
-  <p id="pause-mission"></p>
-  <button class="btn" id="btn-resume">RESUME</button>
-  <button class="btn secondary" id="btn-restart-mission">RESTART MISSION</button>
-  <button class="btn secondary" id="btn-save-quit">SAVE &amp; QUIT TO TITLE</button>
-  <div class="controls-grid">
-    <span><b>WASD</b> move / drive</span><span><b>Mouse</b> orbit camera</span>
-    <span><b>E</b> enter / exit car</span><span><b>LMB</b> shoot · <b>Q</b> punch</span>
-    <span><b>R</b> reload</span><span><b>Space</b> handbrake</span>
+<!-- ============ Start screen ============ -->
+<div id="start-screen">
+  <div class="menu-panel">
+    <div class="game-title">MERIDIAN BAY</div>
+    <div class="game-subtitle">A sun-soaked open-world crime story</div>
+    <div class="game-tagline">Kai Mercer. Harbor Kings. Vesper Syndicate.<br>One city. Five missions. No way back.</div>
+    <button id="btn-new" class="menu-btn primary">▶ NEW GAME</button>
+    <button id="btn-continue" class="menu-btn">CONTINUE — MISSION <span id="continue-num">1</span></button>
+    <button id="btn-freeroam" class="menu-btn">FREE ROAM</button>
+    <button id="btn-controls" class="menu-btn">CONTROLS</button>
+    <div id="controls-box" class="hidden">
+      <p><b>WASD</b> move / drive &nbsp; <b>Mouse</b> orbit camera &nbsp; <b>Shift</b> sprint</p>
+      <p><b>E</b> enter / exit car &nbsp; <b>Space</b> handbrake &nbsp; <b>LMB</b> shoot &nbsp; <b>Q</b> punch &nbsp; <b>R</b> reload</p>
+      <p><b>F</b> headlights &nbsp; <b>M</b> city map &nbsp; <b>Esc</b> pause &nbsp; <b>H</b> horn</p>
+      <p>Steal cars, lose the cops, run the five missions. Cash is king in Meridian Bay.</p>
+    </div>
+    <div class="menu-foot">An original game — no real gangs, no borrowed names. Progress saves automatically.</div>
   </div>
 </div>
 
-<!-- Mission complete -->
-<div class="screen" id="screen-complete">
-  <h2 id="complete-title">Mission complete</h2>
-  <div id="complete-reward">+$500</div>
-  <p id="complete-outro"></p>
-  <p id="complete-cash"></p>
-  <button class="btn" id="btn-complete-next">Next mission</button>
+<!-- ============ Pause menu ============ -->
+<div id="pause-screen" class="hidden">
+  <div class="menu-panel small">
+    <div class="game-title small">PAUSED</div>
+    <button id="btn-resume" class="menu-btn primary">RESUME</button>
+    <button id="btn-restart-mission" class="menu-btn">RESTART MISSION</button>
+    <button id="btn-quit-menu" class="menu-btn">QUIT TO MENU</button>
+    <div class="menu-foot">Progress is saved automatically.</div>
+  </div>
 </div>
 
-<!-- Mission failed / wasted / busted -->
-<div class="screen" id="screen-fail">
-  <h2 id="fail-title">Mission failed</h2>
-  <p id="fail-reason"></p>
-  <button class="btn" id="btn-fail-retry">RETRY MISSION</button>
-  <button class="btn secondary" id="btn-fail-roam">FREE ROAM INSTEAD</button>
-</div>
-
-<!-- Story complete -->
-<div class="screen" id="screen-end">
-  <h2>THE LEGEND OF MERIDIAN BAY</h2>
-  <p>Kai Mercer picked his side, settled the war, and became the name every
-  crew in the city knows. The streets are yours now — keep driving.</p>
-  <p id="end-cash"></p>
-  <button class="btn" id="btn-end-roam">KEEP EXPLORING (FREE ROAM)</button>
-</div>
-
-<!-- Full map -->
-<div class="screen" id="screen-map">
-  <h2>MERIDIAN BAY</h2>
-  <canvas id="map-canvas" width="640" height="640"></canvas>
-  <button class="btn" id="btn-map-close" style="margin-top:16px">CLOSE MAP (M)</button>
+<!-- ============ Mission end screen ============ -->
+<div id="mission-screen" class="hidden">
+  <div class="menu-panel small">
+    <div id="mission-end-title" class="game-title small">MISSION COMPLETE</div>
+    <div id="mission-end-text" class="game-tagline"></div>
+    <div id="mission-end-reward" class="reward-line"></div>
+    <button id="btn-mission-next" class="menu-btn primary">CONTINUE</button>
+    <button id="btn-mission-retry" class="menu-btn hidden">RETRY MISSION</button>
+  </div>
 </div>
 
 <script src="vendor/three.min.js"></script>
-<script type="module" src="src/main.js"></script>
+<script src="src/config.js"></script>
+<script src="src/util/random.js"></script>
+<script src="src/input.js"></script>
+<script src="src/save/storage.js"></script>
+<script src="src/audio/sound.js"></script>
+<script src="src/effects/particles.js"></script>
+<script src="src/world/daylight.js"></script>
+<script src="src/world/city.js"></script>
+<script src="src/player/character.js"></script>
+<script src="src/player/camera.js"></script>
+<script src="src/vehicles/cars.js"></script>
+<script src="src/vehicles/traffic.js"></script>
+<script src="src/people/pedestrians.js"></script>
+<script src="src/police/wanted.js"></script>
+<script src="src/police/chase.js"></script>
+<script src="src/combat/weapons.js"></script>
+<script src="src/missions/story.js"></script>
+<script src="src/missions/manager.js"></script>
+<script src="src/ui/hud.js"></script>
+<script src="src/ui/minimap.js"></script>
+<script src="src/ui/menus.js"></script>
+<script src="src/scenarios.js"></script>
+<script src="src/main.js"></script>
 </body>
 </html>
