@@ -169,6 +169,15 @@ class Game {
         const c = this.missionCar;
         return c ? { x: c.pos.x, z: c.pos.z } : null;
       },
+      nearestPoliceDist: () => {
+        const pp = this.playerPos();
+        let bd = null;
+        for (const c of this.police.cars) {
+          const d = Math.hypot(c.pos.x - pp.x, c.pos.z - pp.z);
+          if (bd === null || d < bd) bd = d;
+        }
+        return bd;
+      },
     };
     window.__ready = false;
 
