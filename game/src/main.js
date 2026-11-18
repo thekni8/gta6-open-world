@@ -170,9 +170,12 @@ class Game {
         return c ? { x: c.pos.x, z: c.pos.z } : null;
       },
       nearestPoliceDist: () => {
+        // Nearest CHASER (parked roadblock cars don't count — they sit
+        // where they were placed and would skew the outrun reading).
         const pp = this.playerPos();
         let bd = null;
         for (const c of this.police.cars) {
+          if (c.blocker) continue;
           const d = Math.hypot(c.pos.x - pp.x, c.pos.z - pp.z);
           if (bd === null || d < bd) bd = d;
         }
