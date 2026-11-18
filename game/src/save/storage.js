@@ -1,37 +1,44 @@
-// localStorage save: cash, mission progress, and where Kai was standing.
-// The wanted level is never saved — a fresh session always starts clean,
-// as the design brief requires.
+// Save games in localStorage: cash, unlocked missions, completed missions
+// and where Kai was standing. Small, versioned, and tolerant of corrupt data.
 
-import { CONFIG } from '../config.js';
+import { CFG, LANDMARKS } from '../config.js';
 
-export const Save = {
-  load() {
-    try {
-      const raw = localStorage.getItem(CONFIG.saveKey);
-      if (!raw) return null;
-      const data = JSON.parse(raw);
-      if (typeof data !== 'object' || data === null || Array.isArray(data)) return null;
-      return data;
-    } catch {
-      return null;
-    }
-  },
+export function defaultSave() {
+  return {
+    cash: CFG.startingCash,
+    unlocked: 0,
+    completed: [],
+    playerPos: { x: LANDMARKS.safehouse.x, z: LANDMARKS.safehouse.z },
+    version: 1,
+  };
+}
 
-  write(data) {
-    try {
-      localStorage.setItem(CONFIG.saveKey, JSON.stringify(data));
-      return true;
-    } catch {
-      // Storage full or blocked — the game still plays, it just won't save.
-      return false;
-    }
-  },
+export function loadSave() {
+  try {
+    const raw = localStorage.getItem(CFG.saveKey);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || typeof data.cash !== 'number') return null;
+    return { ...defaultSave(), ...data };
+  } catch (_) {
+    return null;
+  }
+}
 
-  clear() {
-    try {
-      localStorage.removeItem(CONFIG.saveKey);
-    } catch {
-      // Nothing to do: no storage, no save to clear.
-    }
-  },
-};
+export function hasSave() {
+  return loadSave() !== null;
+}
+
+export function writeSave(save) {
+  try {
+    localStorage.setItem(CFG.saveKey, JSON.stringify(save));
+  } catch (_) {
+    // Private mode or full storage: the game still plays, it just forgets.
+  }
+}
+
+export function clearSave() {
+  try {
+    localStorage.removeItem(CFG.saveKey);
+  } catch (_) { /* ignore */ }
+}

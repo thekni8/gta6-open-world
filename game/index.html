@@ -3,81 +3,174 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Meridian Bay — an open-world crime game</title>
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="./style.css">
-<script type="importmap">
-{ "imports": { "three": "./vendor/three.min.js" } }
-</script>
+<title>Meridian Bay — Open-World Crime Game</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<canvas id="game"></canvas>
+<div id="game-container"></div>
 
-<!-- HUD -->
-<div id="hud" class="hidden">
-  <div id="vignette"></div>
-  <div id="top-left">
-    <div id="health-bar"><div id="health-fill"></div></div>
-    <div id="health-num">100</div>
-    <div id="cash">$200</div>
-    <div id="stars"></div>
-  </div>
+<!-- ============ HUD ============ -->
+<div id="hud" style="display:none">
+  <div id="wanted-flash"></div>
+  <div id="damage-vignette"></div>
+
   <div id="top-right">
-    <canvas id="minimap" width="240" height="240"></canvas>
-    <div id="speed"></div>
+    <div id="stars" class="stars">☆☆☆☆☆</div>
+    <div id="cash">$250</div>
+    <div id="location">Downtown</div>
   </div>
-  <div id="objective-bar">
-    <div id="objective">Visit the start marker to begin the next mission.</div>
-    <div id="timer"></div>
+
+  <div id="minimap-wrap">
+    <canvas id="minimap" width="190" height="190"></canvas>
+    <div id="health-row">
+      <div id="health-bar"><div id="health-fill" class="health-fill"></div></div>
+      <span id="health-text">100</span>
+    </div>
+    <div id="ammo">AMMO 12 / 12</div>
   </div>
-  <div id="message" class="hidden"></div>
-  <div id="crosshair" class="hidden">+</div>
-  <div id="ammo">AMMO 12/12</div>
-  <div id="help-line">WASD move/drive · E enter car · LMB shoot · Q punch · R reload · F lights · M map · Esc pause</div>
-</div>
 
-<!-- Big map overlay -->
-<div id="map-overlay" class="hidden">
-  <canvas id="bigmap" width="640" height="640"></canvas>
-  <p>MERIDIAN BAY — press M to close</p>
-</div>
+  <div id="speed" style="display:none"><span id="speed-value">0</span><span class="speed-unit"> km/h</span></div>
 
-<!-- Start screen -->
-<div id="menu-start" class="menu">
-  <h1>MERIDIAN BAY</h1>
-  <p class="tagline">A sun-soaked open-world crime story. Drive it. Steal it. Survive it.</p>
-  <p class="story">Kai Mercer, driver-for-hire, is caught between the Harbor Kings and the Vesper Syndicate. Five missions. One bay. Your call.</p>
-  <button id="btn-new" class="big-btn">New Game</button>
-  <button id="btn-continue" class="big-btn hidden">Continue</button>
-  <button id="btn-controls" class="big-btn secondary">Controls</button>
-  <div id="controls-panel" class="hidden">
-    <p><b>WASD</b> move / drive &nbsp;·&nbsp; <b>Mouse</b> orbit camera &nbsp;·&nbsp; <b>Shift</b> sprint</p>
-    <p><b>E</b> enter / exit car &nbsp;·&nbsp; <b>Space</b> handbrake &nbsp;·&nbsp; <b>LMB</b> shoot &nbsp;·&nbsp; <b>Q</b> punch</p>
-    <p><b>R</b> reload &nbsp;·&nbsp; <b>F</b> headlights &nbsp;·&nbsp; <b>M</b> big map &nbsp;·&nbsp; <b>N</b> mute &nbsp;·&nbsp; <b>Esc / P</b> pause</p>
-    <p>Steal cars, lose the cops at the safehouse (green circle on the map), and follow the gold marker.</p>
+  <div id="objective-wrap">
+    <div id="objective">Free roam — explore Meridian Bay</div>
+    <div id="objective-dist"></div>
   </div>
-  <p class="foot">An original game. No Rockstar / GTA content. Best in desktop Chrome.</p>
+
+  <div id="toast"></div>
+
+  <div id="banner">
+    <div id="banner-title"></div>
+    <div id="banner-sub"></div>
+  </div>
+
+  <div id="crosshair"><div class="ch-dot"></div><div class="ch-ring"></div></div>
+  <div id="hitmarker">✕</div>
+
+  <div id="busted-meter" style="display:none"><div class="busted-label">BUSTED INCOMING — RUN!</div><div class="busted-bar"><div id="busted-fill"></div></div></div>
+  <div id="laylow" style="display:none">LAYING LOW… heat dropping</div>
+
+  <div id="help-hint">WASD move / drive &nbsp;·&nbsp; Mouse look &nbsp;·&nbsp; E enter car &nbsp;·&nbsp; LMB shoot &nbsp;·&nbsp; F punch &nbsp;·&nbsp; R reload &nbsp;·&nbsp; Space handbrake &nbsp;·&nbsp; M map &nbsp;·&nbsp; J mission &nbsp;·&nbsp; Esc pause</div>
 </div>
 
-<!-- Pause menu -->
-<div id="menu-pause" class="menu hidden">
-  <h1>PAUSED</h1>
-  <button id="btn-resume" class="big-btn">Resume</button>
-  <button id="btn-restart" class="big-btn secondary">Restart mission</button>
-  <button id="btn-mute" class="big-btn secondary">Sound: ON</button>
-  <button id="btn-quit" class="big-btn secondary">Save &amp; quit to menu</button>
+<!-- ============ START SCREEN ============ -->
+<div id="start-screen" class="overlay">
+  <div class="panel start-panel">
+    <div class="game-title">MERIDIAN BAY</div>
+    <div class="game-tagline">A sun-soaked city. Two crews. One driver.</div>
+    <p class="intro">Kai Mercer drives for whoever pays — until the Harbor Kings and the
+    Vesper Syndicate both come calling. Steal cars, outrun the Meridian PD,
+    and pick a side before the city picks one for you.</p>
+    <button id="btn-new" class="btn primary">▶ NEW GAME</button>
+    <button id="btn-continue" class="btn">↻ CONTINUE</button>
+    <button id="btn-controls" class="btn ghost">CONTROLS</button>
+    <div class="mission-heading">MISSIONS</div>
+    <div id="mission-list"></div>
+    <div class="foot-note">An original game. No affiliation with any commercial title.</div>
+  </div>
 </div>
 
-<!-- Mission end screen -->
-<div id="menu-end" class="menu hidden">
-  <h1 id="end-title">Mission Complete</h1>
-  <p id="end-text" class="story"></p>
-  <button id="btn-end-next" class="big-btn">Next mission</button>
-  <button id="btn-end-retry" class="big-btn secondary hidden">Retry mission</button>
+<!-- ============ PAUSE ============ -->
+<div id="pause-screen" class="overlay" style="display:none">
+  <div class="panel">
+    <div class="panel-title">PAUSED</div>
+    <button id="btn-resume" class="btn primary">▶ RESUME</button>
+    <button id="btn-restart-mission" class="btn">↻ RESTART MISSION</button>
+    <button id="btn-pause-controls" class="btn ghost">CONTROLS</button>
+    <button id="btn-quit-title" class="btn ghost">SAVE &amp; QUIT TO TITLE</button>
+    <div class="mission-heading">MISSIONS</div>
+    <div id="pause-mission-list"></div>
+  </div>
 </div>
 
-<div id="fatal" class="hidden"></div>
+<!-- ============ MISSION COMPLETE / FAILED ============ -->
+<div id="mission-complete" class="overlay" style="display:none">
+  <div class="panel">
+    <div id="complete-title" class="panel-title good">MISSION COMPLETE</div>
+    <p id="complete-text"></p>
+    <button id="btn-next-mission" class="btn primary">▶ NEXT MISSION</button>
+    <button id="btn-freeroam" class="btn ghost">FREE ROAM</button>
+  </div>
+</div>
 
-<script type="module" src="./src/main.js"></script>
+<div id="mission-failed" class="overlay" style="display:none">
+  <div class="panel">
+    <div id="fail-title" class="panel-title bad">MISSION FAILED</div>
+    <p id="fail-text"></p>
+    <button id="btn-retry" class="btn primary">↻ RETRY MISSION</button>
+    <button id="btn-fail-freeroam" class="btn ghost">FREE ROAM</button>
+  </div>
+</div>
+
+<!-- ============ THE CHOICE ============ -->
+<div id="choice-screen" class="overlay" style="display:none">
+  <div class="panel wide">
+    <div class="panel-title">THE CHOICE</div>
+    <p>Both crews are here. Both want you. There is no third option — pick a side and live with it.</p>
+    <div class="choice-row">
+      <button id="btn-harbor" class="btn choice harbor">
+        <span class="choice-name">HARBOR KINGS</span>
+        <span id="choice-harbor-blurb" class="choice-blurb"></span>
+      </button>
+      <button id="btn-vesper" class="btn choice vesper">
+        <span class="choice-name">VESPER SYNDICATE</span>
+        <span id="choice-vesper-blurb" class="choice-blurb"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ WASTED / BUSTED ============ -->
+<div id="dead-screen" class="overlay" style="display:none">
+  <div class="panel">
+    <div class="panel-title bad huge">WASTED</div>
+    <p id="dead-text"></p>
+    <button id="btn-respawn" class="btn primary">↻ WAKE UP AT THE SAFEHOUSE</button>
+  </div>
+</div>
+
+<div id="busted-screen" class="overlay" style="display:none">
+  <div class="panel">
+    <div class="panel-title bad huge">BUSTED</div>
+    <p id="busted-text"></p>
+    <button id="btn-busted-ok" class="btn primary">↻ BACK TO THE SAFEHOUSE</button>
+  </div>
+</div>
+
+<!-- ============ CONTROLS ============ -->
+<div id="controls-panel" class="overlay" style="display:none">
+  <div class="panel">
+    <div class="panel-title">CONTROLS</div>
+    <table class="controls-table">
+      <tr><td>W A S D</td><td>Move on foot / drive</td></tr>
+      <tr><td>Mouse</td><td>Look around (click to lock the cursor)</td></tr>
+      <tr><td>Q / E</td><td>Orbit camera (E also enters cars on foot)</td></tr>
+      <tr><td>Shift</td><td>Sprint</td></tr>
+      <tr><td>E</td><td>Enter / exit car</td></tr>
+      <tr><td>Space</td><td>Handbrake / drift</td></tr>
+      <tr><td>Left click</td><td>Shoot pistol</td></tr>
+      <tr><td>F</td><td>Punch</td></tr>
+      <tr><td>R</td><td>Reload</td></tr>
+      <tr><td>M</td><td>Big map</td></tr>
+      <tr><td>J</td><td>Start next mission</td></tr>
+      <tr><td>Esc</td><td>Pause</td></tr>
+    </table>
+    <p class="tip">Stealing cars, hitting pedestrians and shooting near police raise your
+    wanted level. Lose the heat at the purple SPRAY shop on the map, or by
+    staying out of sight.</p>
+    <button id="btn-controls-close" class="btn primary">CLOSE</button>
+  </div>
+</div>
+
+<!-- ============ BIG MAP ============ -->
+<div id="bigmap" class="overlay" style="display:none">
+  <div class="panel wide">
+    <div class="panel-title">MERIDIAN BAY</div>
+    <canvas id="bigmap-canvas" width="520" height="520"></canvas>
+    <button id="btn-bigmap-close" class="btn primary">CLOSE (M)</button>
+  </div>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script type="module" src="src/main.js"></script>
 </body>
 </html>

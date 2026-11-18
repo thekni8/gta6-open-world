@@ -1,107 +1,130 @@
-// Meridian Bay — every tuning number in one place. The city grid, the
-// feel of walking and driving, how hard the police push back, and the
-// golden-hour palette all live here, so one edit retunes the whole game.
+// Meridian Bay — tuning constants and world layout.
+// One place for every number the rest of the game shares, so balancing
+// never means hunting through gameplay code.
 
-export const CONFIG = {
-  // The city is a 9x9 road grid: roads on both axes at -256..256 in steps
-  // of 64, blocks of 50 m between them, 14 m of asphalt per road.
-  world: {
-    pitch: 64,
-    block: 50,
-    roadWidth: 14,
-    roads: [-256, -192, -128, -64, 0, 64, 128, 192, 256],
-    bound: 300, // playable edge; the sea and the port sit just past it
-    seaEdge: -296, // water begins west of here
-    sandEdge: -278, // beach strip between the last road and the water
-    portEdge: 268, // container yard begins east of here
-    seed: 20261118,
+export const CFG = {
+  // World layout: a 9x9 road grid, roads every 60 units, road half-width 7.
+  roadSpacing: 60,
+  roadHalfWidth: 7,
+  roadCoords: [-240, -180, -120, -60, 0, 60, 120, 180, 240],
+  cityBound: 270,
+  beachStart: 232,
+  seaStart: 300,
+
+  // Player on foot.
+  walkSpeed: 6.5,
+  sprintSpeed: 10.5,
+  playerRadius: 0.9,
+  playerHealth: 100,
+  healthRegenDelay: 5,
+  healthRegenRate: 6,
+
+  // Driving (arcade physics, units per second).
+  carAccel: 16,
+  carBrake: 30,
+  carMaxSpeed: 38,
+  carMaxReverse: 11,
+  carDrag: 0.55,
+  carGrip: 7.5,
+  handbrakeDecel: 22,
+  carRadius: 2.3,
+  trafficSpeed: 13,
+  trafficCount: 16,
+  policeTopSpeed: 44,
+
+  // Wanted level: heat 0..100 maps to stars at these thresholds.
+  starThresholds: [10, 30, 50, 70, 90],
+  heatDecayPerSecond: 3.5,
+  heatDecayDelay: 6,
+  crimeHeat: {
+    stealCar: 22,
+    hitPedestrian: 18,
+    hurtPedestrian: 30,
+    shootNearPolice: 14,
+    ramPoliceCar: 16,
+    hurtPolice: 40,
+    killEnemy: 0,
   },
+  policeTargetByStars: [0, 2, 3, 4, 6, 8],
+  roadblockStars: 4,
+  bustedRange: 11,
+  bustedSeconds: 3,
 
-  player: {
-    walk: 6.8,
-    sprint: 11.5,
-    accel: 42,
-    radius: 0.55,
-    health: 100,
-    reach: 2.3, // melee range
-    punch: 26, // melee damage
-  },
+  // Combat.
+  pistolDamage: 34,
+  pistolRange: 90,
+  pistolAmmo: 12,
+  pistolReloadSeconds: 1.4,
+  pistolFireInterval: 0.22,
+  meleeDamage: 25,
+  meleeRange: 2.6,
+  enemyHealth: 60,
+  enemyDamage: 9,
+  enemyShootInterval: 1.9,
+  enemyAggroRange: 45,
 
-  car: {
-    accel: 27,
-    brake: 44,
-    topSpeed: 44, // m/s, about 158 km/h
-    topReverse: 13,
-    steerLock: 0.6,
-    radius: 1.7,
-    scrapeDamage: 5,
-  },
+  // People.
+  pedestrianCount: 26,
+  pedWalkSpeed: 2.2,
+  pedFleeSpeed: 6.5,
 
-  crowd: {
-    trafficCars: 28,
-    cruiseMin: 7,
-    cruiseMax: 11.5,
-    pedestrians: 44,
-    pedWalkMin: 1.1,
-    pedWalkMax: 2.1,
-  },
+  // Economy.
+  startingCash: 250,
+  deathFine: 120,
+  bustedFine: 200,
+  missionRewards: [500, 800, 1200, 1800, 3000],
 
-  police: {
-    // Interceptors on the road for each wanted level (index = stars).
-    fleet: [0, 1, 2, 3, 4, 5],
-    pursuitSpeed: 35,
-    ramDamage: 6,
-    roadblockStars: 3,
-    roadblockCooldown: 25,
-    decaySeconds: 14, // unseen seconds before a star drops
-    sight: 58,
-  },
+  // Rendering.
+  shadowMapSize: 2048,
+  shadowRadius: 130,
+  fogNear: 170,
+  fogFar: 520,
+  skyColor: 0x8fc7e8,
+  sunColor: 0xffd9a3,
+  sunIntensity: 2.6,
+  hemiSky: 0xbfe3ff,
+  hemiGround: 0x8a7a66,
 
-  wanted: {
-    stealCar: 1,
-    hitPedestrian: 1,
-    shoot: 1,
-    hitPolice: 2,
-    killPedestrian: 1,
-    maxStars: 5,
-  },
-
-  combat: {
-    pistolDamage: 34,
-    pistolRange: 95,
-    magazine: 12,
-    reloadTime: 1.1,
-    fireGap: 0.22,
-    enemyHealth: 60,
-    enemyDamage: 5,
-    enemyShotGap: 1.6,
-    enemyRange: 44,
-    enemyChaseSpeed: 4.6,
-  },
-
-  // Late-afternoon Meridian Bay: warm sun, peach haze, teal water.
-  palette: {
-    sky: 0x7fb4e0,
-    haze: 0xe9c9a6,
-    sun: 0xffb168,
-    road: 0x3a3f46,
-    roadLine: 0xd8c86a,
-    sidewalk: 0x9aa0a3,
-    sand: 0xe8d29a,
-    sea: 0x1f7f8c,
-    grass: 0x6f9e5a,
-    facade: [
-      0xe8b48c, 0xd99a7a, 0xc98d7a, 0xa8b8c8, 0x8fb0a0,
-      0xe0cfa0, 0xb8a8c8, 0xd8d0c0, 0x9ab8d8, 0xc8a0a0,
-    ],
-    tower: [0x7a9ab8, 0x8fb8d8, 0x6a8aa8, 0xa8c0d8],
-    paint: [
-      0xc0392b, 0x2e86c1, 0xf1c40f, 0x27ae60, 0x8e44ad,
-      0xe67e22, 0xecf0f1, 0x1a1a1a, 0x7f8c8d, 0x16a085,
-    ],
-    police: 0x1a2a4a,
-    gold: 0xf5c518,
-  },
-
-  saveKey: 'meridian-bay-save-v3',
+  saveKey: 'meridian-bay-save-v1',
 };
+
+// Named places the missions, HUD and minimap all agree on.
+export const LANDMARKS = {
+  safehouse: { x: -210, z: -210, name: 'Kai\'s Safehouse' },
+  garage: { x: 210, z: 150, name: 'Harbor Kings Garage' },
+  sprayShop: { x: 60, z: -210, name: 'Spray & Lay Low' },
+  port: { x: 225, z: 60, name: 'Meridian Port' },
+  downtown: { x: 0, z: 0, name: 'Downtown' },
+  marina: { x: -210, z: -150, name: 'Marina Club' },
+  beach: { x: 0, z: 240, name: 'Bayfront Beach' },
+  plaza: { x: 0, z: 60, name: 'Meridian Plaza' },
+};
+
+// District names shown on the HUD as the player moves around.
+export function districtAt(x, z) {
+  if (z > CFG.beachStart) return 'Bayfront Beach';
+  if (x > 180) return 'Meridian Port';
+  if (x < -180 && z < -60) return 'Marina District';
+  if (Math.abs(x) < 120 && Math.abs(z) < 120) return 'Downtown';
+  if (z < -180) return 'Old Town North';
+  if (x < -120) return 'Westside';
+  return 'Old Town';
+}
+
+// Pastel building palettes per district, so each area reads differently.
+export const PALETTES = {
+  downtown: [0x9fb4c7, 0xb7c4ce, 0x8fa8bd, 0xc9b8a3, 0xa8b8a0, 0xd8cdbd],
+  oldtown: [0xe8c9a0, 0xd9a08c, 0xc9d6c0, 0xe0d3b8, 0xb8c9d9, 0xd9b8c4],
+  marina: [0xf2e3c9, 0xc9e0e8, 0xe8d3c0, 0xd9e8d3, 0xf0d9b8],
+  port: [0xb8a894, 0x9a938a, 0xc0b49a, 0x8a9aa8],
+};
+
+export const CAR_COLORS = [
+  0xc0392b, 0x2980b9, 0xf1c40f, 0x27ae60, 0xe67e22, 0x8e44ad,
+  0xecf0f1, 0x2c3e50, 0x1abc9c, 0xd35400, 0x7f8c8d, 0xfd79a8,
+];
+
+export const PED_SHIRTS = [
+  0xe74c3c, 0x3498db, 0x2ecc71, 0xf39c12, 0x9b59b6,
+  0x1abc9c, 0xe67e22, 0xfd79a8, 0x95a5a6, 0x2d3436,
+];

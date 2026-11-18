@@ -1,96 +1,94 @@
-// Third-person follow camera. It orbits with the mouse, trails behind
-// Kai or his car, eases behind the car's heading while driving, and pulls
-// in when a building would block the view. Screen shake is a decaying
-// wobble added on crashes and hits.
+// Third-person follow camera: orbits with the mouse (pointer lock, or Q/E
+// as a fallback), pulls in instead of clipping through buildings, and kicks
+// the FOV out a little at driving speed.
 
-import * as THREE from 'three';
-import { clamp, angleDelta } from '../util/random.js';
+import { clamp, lerp } from '../util/random.js';
 
-export class FollowCamera {
-  constructor(camera) {
-    this.camera = camera;
-    this.yaw = 0; // 0 = camera sits toward +Z, looking toward -Z
-    this.pitch = 0.3;
-    this.distance = 8.5;
-    this.lookAt = new THREE.Vector3();
-    this.shake = 0;
+const THREE = window.THREE;
+
+export class CameraRig {
+  constructor(G) {
+    this.G = G;
+    this.yaw = 0;
+    this.pitch = 0.32;
+    this.distance = 9;
+    this.currentPos = new THREE.Vector3(0, 6, 12);
+    this.lookTarget = new THREE.Vector3();
+    this.shakeOffset = new THREE.Vector3();
   }
 
-  orbit(dx, dy) {
-    this.yaw -= dx * 0.0032;
-    this.pitch = clamp(this.pitch + dy * 0.0028, -0.12, 1.05);
-  }
+  update(dt, target, driving, speed01) {
+    const G = this.G;
+    const input = G.input;
+    const { dx, dy } = input.consumeMouse();
+    this.yaw -= dx * 0.0026;
+    this.pitch = clamp(this.pitch + dy * 0.0022, -0.15, 1.05);
+    // Q/E orbit the camera without the mouse — handy on a trackpad.
+    if (input.isDown('KeyQ')) this.yaw += dt * 2.2;
+    if (input.isDown('KeyE') && driving) this.yaw -= dt * 2.2;
 
-  addShake(amount) {
-    this.shake = Math.min(0.9, this.shake + amount);
-  }
+    const wantDist = driving ? 12.5 : 8.5;
+    this.distance = lerp(this.distance, wantDist, Math.min(1, dt * 3));
+    const camHeight = driving ? 4.6 : 3.4;
+    const headY = driving ? 1.6 : 2.2;
 
-  /** Follow `pos` (player or car) with heading `heading`.
-   *  On foot the camera looks at a point well ahead of Kai, so the
-   *  crosshair ray runs near chest height instead of diving into the
-   *  ground a few metres past him (which would make shooting useless). */
-  update(dt, pos, heading, city, driving) {
-    // While driving, the camera eases behind the car's heading; on foot it
-    // stays where the mouse put it.
-    if (driving) {
-      this.yaw += angleDelta(this.yaw, heading + Math.PI) * Math.min(1, dt * 1.7);
-    }
-    const wantedDist = driving ? 10.5 : 8;
-    this.distance += (wantedDist - this.distance) * Math.min(1, dt * 3);
-    const height = driving ? 3.9 : 1.35 + Math.sin(this.pitch) * this.distance * 0.5;
-    const cosP = Math.cos(this.pitch);
-    const camX = pos.x + Math.sin(this.yaw) * cosP * this.distance;
-    const camZ = pos.z + Math.cos(this.yaw) * cosP * this.distance;
-    const camY = pos.y + height + (driving ? Math.sin(this.pitch) * this.distance : 0);
+    const cx = target.x - Math.sin(this.yaw) * Math.cos(this.pitch) * this.distance;
+    const cz = target.z - Math.cos(this.yaw) * Math.cos(this.pitch) * this.distance;
+    const cy = headY + Math.sin(this.pitch) * this.distance + camHeight * 0.4;
 
-    // Pull the camera in if a building sits between it and the player.
-    let clearDist = this.distance;
+    // Collision: step from the head to the wanted camera spot; stop short of
+    // the first building the segment would enter.
+    let dist = this.distance;
     const steps = 10;
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
-      const sx = pos.x + (camX - pos.x) * t;
-      const sz = pos.z + (camZ - pos.z) * t;
-      const sy = pos.y + 1.6 + (camY - (pos.y + 1.6)) * t;
-      let blocked = false;
-      for (const b of city.buildings) {
-        if (sx > b.minX && sx < b.maxX && sz > b.minZ && sz < b.maxZ && sy < b.h) {
-          blocked = true;
-          break;
-        }
-      }
-      if (blocked) {
-        clearDist = this.distance * Math.max(0.1, t - 0.12);
+      const px = target.x + (cx - target.x) * t;
+      const pz = target.z + (cz - target.z) * t;
+      const py = headY + (cy - headY) * t;
+      if (py < 26 && this.pointInBuilding(px, pz)) {
+        dist = Math.max(2.5, this.distance * ((i - 1) / steps));
         break;
       }
     }
-    clearDist = Math.max(2.5, clearDist);
-    const fx = pos.x + Math.sin(this.yaw) * cosP * clearDist;
-    const fz = pos.z + Math.cos(this.yaw) * cosP * clearDist;
-    const fy = pos.y + height + (driving ? Math.sin(this.pitch) * clearDist : 0);
-    // Over-the-shoulder on foot: the CAMERA sits right of Kai, so he
-    // reads left of the crosshair — but the LOOK TARGET stays on his
-    // line, unshifted, so the crosshair ray converges onto the line he
-    // shoots along instead of running parallel 1.4 m beside it (which
-    // made the ray miss every gunman standing dead ahead).
-    const shoulder = driving ? 0 : 0.9;
-    const rx = Math.cos(this.yaw) * shoulder;
-    const rz = -Math.sin(this.yaw) * shoulder;
+    const fx = target.x - Math.sin(this.yaw) * Math.cos(this.pitch) * dist;
+    const fz = target.z - Math.cos(this.yaw) * Math.cos(this.pitch) * dist;
+    const fy = headY + Math.sin(this.pitch) * dist + camHeight * 0.4;
 
-    this.shake = Math.max(0, this.shake - dt * 2.2);
-    const sh = this.shake * this.shake;
-    const shx = (Math.random() - 0.5) * sh * 0.7;
-    const shy = (Math.random() - 0.5) * sh * 0.7;
+    const smooth = Math.min(1, dt * (driving ? 5 : 8));
+    this.currentPos.x = lerp(this.currentPos.x, fx, smooth);
+    this.currentPos.y = lerp(this.currentPos.y, fy, smooth);
+    this.currentPos.z = lerp(this.currentPos.z, fz, smooth);
 
-    this.camera.position.set(fx + rx + shx, fy + shy, fz + rz);
-    if (driving) {
-      this.lookAt.set(pos.x, pos.y + 1.7, pos.z);
-    } else {
-      // Aim point far ahead at chest height, ON Kai's line (unshifted):
-      // the crosshair ray is honest.
-      const ax = -Math.sin(this.yaw);
-      const az = -Math.cos(this.yaw);
-      this.lookAt.set(pos.x + ax * 18, pos.y + 1.5, pos.z + az * 18);
+    // Screen shake from the effects system, decaying on its own.
+    const sh = G.fx.shakeAmount;
+    this.shakeOffset.set(
+      (Math.random() - 0.5) * sh,
+      (Math.random() - 0.5) * sh,
+      (Math.random() - 0.5) * sh,
+    );
+    const cam = G.camera;
+    cam.position.copy(this.currentPos).add(this.shakeOffset);
+    this.lookTarget.set(target.x, headY, target.z);
+    cam.lookAt(this.lookTarget);
+    const wantFov = driving ? 62 + speed01 * 12 : 60;
+    if (Math.abs(cam.fov - wantFov) > 0.1) {
+      cam.fov = lerp(cam.fov, wantFov, Math.min(1, dt * 4));
+      cam.updateProjectionMatrix();
     }
-    this.camera.lookAt(this.lookAt);
+  }
+
+  pointInBuilding(x, z) {
+    for (const b of this.G.city.colliders) {
+      if (x > b.minX - 0.5 && x < b.maxX + 0.5 && z > b.minZ - 0.5 && z < b.maxZ + 0.5) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  snapTo(target) {
+    const cx = target.x - Math.sin(this.yaw) * this.distance;
+    const cz = target.z - Math.cos(this.yaw) * this.distance;
+    this.currentPos.set(cx, 5, cz);
   }
 }

@@ -1,114 +1,142 @@
-// Traffic: cars that cruise the road grid in their lane, turn at
-// intersections, brake for the car ahead, and slow down near the player on
-// foot. They are the city's pulse — and the cars the player steals.
+// Traffic: cars that drive the road grid, turn at intersections, brake for
+// the car ahead and keep the city feeling alive. They stay near the player:
+// cars that drift far away are respawned on a road nearby.
 
-import { CONFIG } from '../config.js';
-import { range, choice } from '../util/random.js';
-import { Car, randomPaint, randomKind } from './cars.js';
-
-const TURNS = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+import { CFG, CAR_COLORS } from '../config.js';
+import { Car } from './cars.js';
+import { SeededRandom, angleDiff, clamp } from '../util/random.js';
 
 export class Traffic {
-  constructor(scene, city, rng) {
-    this.scene = scene;
-    this.city = city;
-    this.rng = rng;
+  constructor(G) {
+    this.G = G;
+    this.rng = new SeededRandom(G.seed + 77);
     this.cars = [];
-    for (let i = 0; i < CONFIG.crowd.trafficCars; i++) this.spawnCar();
+    this.spawnInitial();
   }
 
-  spawnCar(at) {
-    const p = at ?? this.city.randomRoadPoint();
-    const heading = choice(this.rng, TURNS);
-    // Keep the car on its road: nudge onto the nearest centre line.
-    const road = this.city.nearestRoad(p.x, p.z);
-    const car = new Car(
-      this.scene,
-      randomPaint(this.rng),
-      randomKind(this.rng),
-      road.x,
-      road.z,
-      heading,
-    );
-    car.cruise = range(this.rng, CONFIG.crowd.cruiseMin, CONFIG.crowd.cruiseMax);
+  spawnInitial() {
+    for (let i = 0; i < CFG.trafficCount; i++) {
+      this.spawnCar(true);
+    }
+  }
+
+  spawnCar(anywhere) {
+    const G = this.G;
+    const p = G.city.randomRoadPoint(this.rng);
+    if (!anywhere) {
+      const d = Math.hypot(p.x - G.player.x, p.z - G.player.z);
+      if (d > 170) return null;
+    }
+    const dir = this.rng.chance(0.5) ? 1 : -1;
+    const heading = p.axis === 'x' ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (dir > 0 ? 0 : Math.PI);
+    // Right-hand lane: offset to the right of the direction of travel.
+    const lane = 3.5;
+    const ox = p.axis === 'x' ? 0 : -dir * lane;
+    const oz = p.axis === 'x' ? dir * lane : 0;
+    const car = new Car(G, p.x + ox, p.z + oz, heading, {
+      driver: 'traffic',
+      color: this.rng.pick(CAR_COLORS),
+      kind: this.rng.chance(0.18) ? 'van' : 'sedan',
+    });
+    car.road = { axis: p.axis, coord: p.road, dir };
+    car.cruise = CFG.trafficSpeed * this.rng.range(0.8, 1.15);
+    car.speed = car.cruise * 0.6;
     this.cars.push(car);
     return car;
   }
 
-  /** Nearest drivable car to a point (for E / stealing), within `maxDist`. */
-  nearestCar(x, z, maxDist = 5) {
-    let best = null;
-    let bd = maxDist;
-    for (const car of this.cars) {
-      const d = Math.hypot(car.pos.x - x, car.pos.z - z);
-      if (d < bd) {
-        bd = d;
-        best = car;
-      }
-    }
-    return best;
-  }
-
   removeCar(car) {
     const i = this.cars.indexOf(car);
-    if (i >= 0) this.cars.splice(i, 1);
-    car.remove();
+    if (i !== -1) this.cars.splice(i, 1);
   }
 
-  update(dt, playerPos, playerCar) {
-    const roads = this.city.roadCoords;
-    for (const car of this.cars) {
-      if (car === playerCar) continue;
-      if (car.cruise === undefined) car.cruise = 9; // a car the player drove rejoins traffic
-      // At an intersection, sometimes turn onto the cross road.
-      const nearX = roads.some((r) => Math.abs(car.pos.x - r) < 1.2);
-      const nearZ = roads.some((r) => Math.abs(car.pos.z - r) < 1.2);
-      if (nearX && nearZ && this.rng() < dt * 0.35) {
-        car.heading = choice(this.rng, TURNS);
+  update(dt) {
+    const G = this.G;
+    for (let i = this.cars.length - 1; i >= 0; i--) {
+      const car = this.cars[i];
+      if (car.dead) {
+        // Wrecks linger a while, then get towed away.
+        car.wreckTimer = (car.wreckTimer || 0) + dt;
+        if (car.wreckTimer > 25) {
+          car.dispose();
+          this.cars.splice(i, 1);
+        }
+        continue;
       }
-      // Brake for the car ahead (traffic or the player's).
-      let targetSpeed = car.cruise;
-      const ahead = this.carAhead(car, playerCar);
-      if (ahead !== null && ahead < 9) targetSpeed = 0;
-      // Slow near the player on foot so they don't plough through crowds.
-      const pd = Math.hypot(car.pos.x - playerPos.x, car.pos.z - playerPos.z);
-      if (pd < 7 && !playerCar) targetSpeed = Math.min(targetSpeed, 3);
-      car.speed += (targetSpeed - car.speed) * Math.min(1, dt * 2.5);
-      car.pos.x += Math.sin(car.heading) * car.speed * dt;
-      car.pos.z += Math.cos(car.heading) * car.speed * dt;
-      this.city.collideCircle(car.pos, CONFIG.car.radius);
-      car.group.position.copy(car.pos);
-      car.group.rotation.y = car.heading;
-      const spin = (car.speed * dt) / 0.36;
-      for (const w of car.group.userData.wheels) w.rotation.x += spin;
-      // A car that drove off the road grid (past the edge roads, out onto
-      // the beach or the port apron) gets recycled back into the city —
-      // otherwise it sits against the bowl clamp forever, and one once
-      // ran a player down on the sand by the marina.
-      if (Math.abs(car.pos.x) > 264 || Math.abs(car.pos.z) > 264) {
-        const p = this.city.randomRoadPoint();
-        car.pos.set(p.x, 0, p.z);
-        car.speed = 0;
+      this.driveTrafficCar(car, dt);
+      car.updateSmoke(dt);
+      car.syncMesh();
+      const d = Math.hypot(car.x - G.player.x, car.z - G.player.z);
+      if (d > 220) {
+        car.dispose();
+        this.cars.splice(i, 1);
       }
     }
-    // Top the traffic back up if the player stole a few cars.
-    while (this.cars.length < CONFIG.crowd.trafficCars) this.spawnCar();
+    while (this.cars.length < CFG.trafficCount) {
+      if (!this.spawnCar(false)) break;
+    }
   }
 
-  /** Distance to the nearest car directly ahead of `car`, or null. */
-  carAhead(car, playerCar) {
-    let best = null;
+  driveTrafficCar(car, dt) {
+    const G = this.G;
+    const road = car.road;
+    // Desired heading from the road we are on.
+    let wantHeading;
+    if (road.axis === 'x') wantHeading = road.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+    else wantHeading = road.dir > 0 ? 0 : Math.PI;
+    // At an intersection, sometimes turn onto the crossing road.
+    const along = road.axis === 'x' ? car.x : car.z;
+    const nearest = G.city.nearestRoadCoord(along);
+    if (Math.abs(along - nearest) < 1.2 && !car.turnedAt?.includes?.(nearest)) {
+      if (this.rng.chance(0.35)) {
+        const newAxis = road.axis === 'x' ? 'z' : 'x';
+        const newDir = this.rng.chance(0.5) ? 1 : -1;
+        car.road = { axis: newAxis, coord: nearest, dir: newDir };
+        car.turnedAt = [nearest];
+        wantHeading = newAxis === 'x'
+          ? (newDir > 0 ? Math.PI / 2 : -Math.PI / 2)
+          : (newDir > 0 ? 0 : Math.PI);
+      }
+    }
+    if (Math.abs(along - nearest) > 8) car.turnedAt = null;
+
+    // Steer toward the wanted heading, and stay in the lane.
+    const steerErr = angleDiff(car.heading, wantHeading);
+    let steer = clamp(steerErr * 2.2, -1, 1);
+    // Lane keeping: nudge toward the lane centre line.
+    const lane = 3.5;
+    const laneOffset = road.axis === 'x'
+      ? (car.z - road.coord) - road.dir * lane
+      : (car.x - road.coord) + road.dir * lane;
+    steer = clamp(steer - laneOffset * 0.12 * road.dir * (road.axis === 'x' ? 1 : -1), -1, 1);
+
+    // Brake for whatever is ahead: player car, another car, or a police chase.
+    let throttle = 1;
+    const ahead = this.obstacleAhead(car, 13);
+    if (ahead !== null) {
+      throttle = ahead < 7 ? -0.6 : 0.15;
+    }
+    if (car.speed > car.cruise) throttle = 0;
+    car.driveStep(dt, throttle, steer, false);
+    car.collideWorld();
+  }
+
+  // Distance to the nearest car ahead in our lane, or null.
+  obstacleAhead(car, maxD) {
+    const G = this.G;
     const fx = Math.sin(car.heading);
     const fz = Math.cos(car.heading);
-    const all = playerCar ? [...this.cars, playerCar] : this.cars;
-    for (const other of all) {
-      if (other === car) continue;
-      const dx = other.pos.x - car.pos.x;
-      const dz = other.pos.z - car.pos.z;
-      const along = dx * fx + dz * fz;
-      if (along <= 0 || along > 22) continue;
-      const side = Math.abs(dx * fz - dz * fx);
-      if (side < 2.6 && (best === null || along < best)) best = along;
+    let best = null;
+    const others = [G.player.inCar, ...this.cars, ...G.police.cars];
+    for (const o of others) {
+      if (!o || o === car || o.dead) continue;
+      const dx = o.x - car.x;
+      const dz = o.z - car.z;
+      const ahead = dx * fx + dz * fz;
+      if (ahead < 0 || ahead > maxD) continue;
+      const side = Math.abs(-dx * fz + dz * fx);
+      if (side > 3.2) continue;
+      if (best === null || ahead < best) best = ahead;
     }
     return best;
   }

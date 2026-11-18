@@ -1,72 +1,66 @@
-// Small deterministic helpers. The city is laid out from one seeded
-// stream, so the Meridian Bay a player learns on day one is the same city
-// on day ten; traffic and pedestrians draw from the same stream after it.
+// Seeded random helpers and small math utilities.
+// The city layout is deterministic from its seed, so every player (and every
+// screenshot run with ?seed=) sees the same Meridian Bay.
 
-/** sfc32 — a small fast seeded PRNG with a long period. */
-export function seededRandom(seed) {
+// Mulberry32: tiny, fast, deterministic PRNG.
+export function mulberry32(seed) {
   let a = seed >>> 0;
-  let b = (seed * 2654435761) >>> 0;
-  let c = (seed * 40503) >>> 0;
-  let counter = 1;
   return function next() {
-    a >>>= 0; b >>>= 0; c >>>= 0;
-    let t = (a + b + counter++) >>> 0;
-    a = b ^ (b >>> 9);
-    b = (c + (c << 3)) >>> 0;
-    c = ((c << 21) | (c >>> 11)) >>> 0;
-    c = (c + t) >>> 0;
-    t = (t + a) >>> 0;
-    return (t >>> 0) / 4294967296;
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-/** Uniform float in [min, max). */
-export function range(rng, min, max) {
-  return min + rng() * (max - min);
-}
-
-/** Uniform integer in [min, max], inclusive. */
-export function int(rng, min, max) {
-  return Math.floor(range(rng, min, max + 1));
-}
-
-/** One element of an array, uniformly. */
-export function choice(rng, arr) {
-  return arr[Math.floor(rng() * arr.length)];
-}
-
-/** Fisher-Yates shuffle, in place, from the seeded stream. */
-export function shuffle(rng, arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    const tmp = arr[i];
-    arr[i] = arr[j];
-    arr[j] = tmp;
+export class SeededRandom {
+  constructor(seed) {
+    this.next = mulberry32(seed);
   }
-  return arr;
+  range(min, max) {
+    return min + this.next() * (max - min);
+  }
+  int(min, max) {
+    return Math.floor(this.range(min, max + 1));
+  }
+  pick(list) {
+    return list[Math.floor(this.next() * list.length)];
+  }
+  chance(p) {
+    return this.next() < p;
+  }
 }
 
-/** Clamp a number into [min, max]. */
-export function clamp(v, min, max) {
-  if (v < min) return min;
-  if (v > max) return max;
-  return v;
+export function clamp(value, min, max) {
+  return value < min ? min : value > max ? max : value;
 }
 
-/** Linear interpolation between a and b. */
 export function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-/** Shortest signed turn from angle a to angle b, in (-PI, PI]. */
-export function angleDelta(a, b) {
+// Shortest-arc angle interpolation, for smooth heading turns.
+export function angleLerp(a, b, t) {
   let d = (b - a) % (Math.PI * 2);
   if (d > Math.PI) d -= Math.PI * 2;
-  if (d <= -Math.PI) d += Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
+}
+
+export function angleDiff(a, b) {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
   return d;
 }
 
-/** Flat (x/z) distance between two points. */
-export function flatDist(ax, az, bx, bz) {
-  return Math.hypot(ax - bx, az - bz);
+export function dist2(ax, az, bx, bz) {
+  const dx = ax - bx;
+  const dz = az - bz;
+  return dx * dx + dz * dz;
+}
+
+export function formatCash(n) {
+  return '$' + Math.max(0, Math.round(n)).toLocaleString('en-US');
 }

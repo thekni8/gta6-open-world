@@ -1,373 +1,318 @@
-// Combat: a pistol with a magazine and reload, a melee swing, tracer
-// lines and hit feedback — plus the gunmen the missions throw at the
-// player, who close in and take pot-shots back.
+// Combat: Kai's pistol (raycast from the crosshair) and melee punch, plus
+// enemy gunmen who advance, take shots and fall when their health is gone.
 
-import * as THREE from 'three';
-import { CONFIG } from '../config.js';
-import { range, clamp } from '../util/random.js';
+import { CFG } from '../config.js';
+import { buildPersonMesh } from '../player/character.js';
+import { clamp } from '../util/random.js';
 
-export class Weapons {
-  constructor(scene, camera, rng) {
-    this.scene = scene;
-    this.camera = camera;
-    this.rng = rng;
-    this.ammo = CONFIG.combat.magazine;
-    this.reloading = false;
-    this.reloadTimer = 0;
-    this.cooldown = 0;
-    this.raycaster = new THREE.Raycaster();
-    this.tracerMat = new THREE.LineBasicMaterial({
-      color: 0xffe9a8,
-      transparent: true,
-      opacity: 0.9,
-    });
-    this.onShot = null; // () => {} — sound + scare peds
-    this.onHit = null; // (kind, target) => {} — wanted, mission kills
-    this.lastShot = null; // debug: {aim, hit} of the most recent shot
+const THREE = window.THREE;
+
+const FACTIONS = {
+  vesper: { shirt: 0x8e44ad, skin: 0xe0ac69, hair: 0x1a1a1a, name: 'Vesper gunman' },
+  harbor: { shirt: 0x16a085, skin: 0xc68642, hair: 0x4a3221, name: 'Harbor enforcer' },
+};
+
+class Enemy {
+  constructor(G, x, z, faction) {
+    this.G = G;
+    this.x = x;
+    this.z = z;
+    this.heading = Math.atan2(G.player.x - x, G.player.z - z);
+    this.health = CFG.enemyHealth;
+    this.maxHealth = CFG.enemyHealth;
+    this.faction = faction;
+    this.shootTimer = 1 + Math.random() * 1.5;
+    this.strafeDir = Math.random() > 0.5 ? 1 : -1;
+    this.strafeTimer = 2 + Math.random() * 2;
+    this.walkPhase = Math.random() * 6;
+    this.dead = false;
+    const f = FACTIONS[faction] || FACTIONS.vesper;
+    this.mesh = buildPersonMesh(f.shirt, f.skin, f.hair);
+    this.mesh.position.set(x, 0, z);
+    // A slim health bar floating over the head.
+    const barGeo = new THREE.PlaneGeometry(1.6, 0.18);
+    this.barBg = new THREE.Mesh(barGeo, new THREE.MeshBasicMaterial({ color: 0x330000, transparent: true, opacity: 0.8 }));
+    this.barBg.position.y = 2.7;
+    this.barFg = new THREE.Mesh(barGeo, new THREE.MeshBasicMaterial({ color: 0xff4444 }));
+    this.barFg.position.y = 2.7;
+    this.barFg.position.z = 0.01;
+    this.mesh.add(this.barBg, this.barFg);
+    G.scene.add(this.mesh);
   }
 
-  /** Fire the pistol from the camera centre. Returns what was hit, if anything.
-   *  Two-step aim: the camera ray through the crosshair finds the aim point
-   *  (what the player sees), then the shot travels from Kai's chest to that
-   *  point — so the bullet goes where the crosshair points, at chest height,
-   *  instead of diving into the ground a few metres ahead. */
-  shoot(ctx) {
-    if (this.cooldown > 0 || this.reloading) return null;
-    if (this.ammo <= 0) {
-      this.reload();
-      return null;
+  takeDamage(amount) {
+    if (this.dead) return;
+    this.health -= amount;
+    this.G.fx.burst(this.x, 1.4, this.z, 0xcc2222, 6, 3);
+    if (this.health <= 0) {
+      this.dead = true;
+      this.mesh.rotation.x = -Math.PI / 2;
+      this.mesh.position.y = 0.3;
+      this.barBg.visible = false;
+      this.barFg.visible = false;
+      this.G.audio.enemyDown();
+      this.G.hud.toast('Gunman down.');
     }
-    this.cooldown = CONFIG.combat.fireGap;
-    this.ammo -= 1;
-    this.onShot?.();
-    const origin = this.camera.position.clone();
-    const dir = new THREE.Vector3();
-    this.camera.getWorldDirection(dir);
-    // Kai turns to face where the camera looks when he shoots.
-    ctx.setPlayerHeading?.(Math.atan2(dir.x, dir.z));
-    // Step 1: where does the crosshair point?
-    this.raycaster.set(origin, dir);
-    this.raycaster.far = CONFIG.combat.pistolRange;
-    const worldTargets = [];
-    for (const e of ctx.enemies.list) worldTargets.push(e.mesh);
-    for (const p of ctx.peds.peds) if (p.state !== 'down') worldTargets.push(p.mesh);
-    for (const c of ctx.traffic.cars) worldTargets.push(c.group);
-    for (const c of ctx.police.cars) worldTargets.push(c.group);
-    worldTargets.push(ctx.city.group);
-    const worldHits = this.raycaster.intersectObjects(worldTargets, true);
-    // The camera sits metres behind Kai, so the ray can strike something
-    // behind him first — his just-exited car, a wall the camera is pressed
-    // against. Such a hit is not the aim point: ignore everything closer
-    // than Kai himself, and take the first hit past him.
-    const pp0 = ctx.playerPos();
-    const camToPlayer = origin.distanceTo(pp0);
-    let aimPoint = origin.clone().addScaledVector(dir, CONFIG.combat.pistolRange);
-    let aimDist = CONFIG.combat.pistolRange;
-    for (const h of worldHits) {
-      if (h.distance > camToPlayer + 0.5) {
-        aimPoint = h.point.clone();
-        aimDist = h.distance;
-        break;
-      }
-    }
-    // Aim assist: the crosshair ray is a hairline, and a gunman is 0.66 m
-    // wide — a ray that passes just beside him still counts if he is the
-    // figure the player is looking at. Any enemy or ped within ~2.6° of
-    // the crosshair and closer than the aim point becomes the aim point.
-    // (Closer than the aim point means nothing solid stands between —
-    // the raycast already found the nearest wall.)
-    const assist = (list, getPos) => {
-      let best = null;
-      let bestDist = aimDist;
-      for (const t of list) {
-        const p = getPos(t);
-        const to = new THREE.Vector3(p.x, p.y + 1.4, p.z).sub(origin);
-        const d = to.length();
-        if (d >= bestDist) continue;
-        to.normalize();
-        if (dir.dot(to) > 0.999) {
-          best = new THREE.Vector3(p.x, p.y + 1.4, p.z);
-          bestDist = d;
-        }
-      }
-      return best;
-    };
-    const assisted =
-      assist(ctx.enemies.list, (e) => e.pos) ??
-      assist(ctx.peds.peds.filter((p) => p.state !== 'down'), (p) => p.pos);
-    if (assisted) {
-      aimPoint = assisted;
-      aimDist = origin.distanceTo(assisted);
-    }
-    // Step 2: the shot, from Kai's chest to the aim point.
-    const pp = ctx.playerPos();
-    const muzzle = new THREE.Vector3(pp.x, pp.y + 1.4, pp.z);
-    const shotDir = aimPoint.clone().sub(muzzle);
-    const shotLen = shotDir.length();
-    if (shotLen < 0.5) return null;
-    shotDir.normalize();
-    this.raycaster.set(muzzle, shotDir);
-    this.raycaster.far = Math.min(shotLen, CONFIG.combat.pistolRange);
-    const liveTargets = worldTargets.slice(0, -1); // everything but the city
-    const hits = this.raycaster.intersectObjects(liveTargets, true);
-    let end = aimPoint.clone();
-    let hit = null;
-    if (hits.length > 0) {
-      const h = hits[0];
-      end = h.point.clone();
-      hit = this.identifyHit(h.object);
-      if (hit) this.applyHit(hit, ctx, h.point);
-    }
-    this.showTracer(muzzle, end);
-    ctx.particles.spark(end.x, end.y, end.z, 6);
-    this.lastShot = {
-      aim: { x: aimPoint.x, y: aimPoint.y, z: aimPoint.z },
-      hit: hit ? hit.kind : null,
-      end: { x: end.x, y: end.y, z: end.z },
-    };
-    return hit;
-  }
-
-  identifyHit(object) {
-    let o = object;
-    while (o) {
-      if (o.userData.enemy) return { kind: 'enemy', enemy: o.userData.enemy };
-      if (o.userData.ped) return { kind: 'ped', ped: o.userData.ped };
-      if (o.userData.car) return { kind: 'car', car: o.userData.car };
-      o = o.parent;
-    }
-    return null;
-  }
-
-  applyHit(hit, ctx, point) {
-    if (hit.kind === 'enemy') {
-      const dead = hit.enemy.damage(CONFIG.combat.pistolDamage);
-      ctx.particles.blood(point.x, point.y, point.z);
-      if (dead) {
-        ctx.enemies.remove(hit.enemy);
-        this.onHit?.('enemy', hit.enemy);
-      }
-    } else if (hit.kind === 'ped') {
-      ctx.peds.knockDown(hit.ped);
-      this.onHit?.('ped', hit.ped);
-    } else if (hit.kind === 'car') {
-      const destroyed = hit.car.damage(CONFIG.combat.pistolDamage);
-      if (destroyed) ctx.particles.explosion(hit.car.pos.x, 1, hit.car.pos.z);
-      this.onHit?.('car', hit.car);
-    }
-  }
-
-  showTracer(from, to) {
-    const geo = new THREE.BufferGeometry().setFromPoints([from, to]);
-    const line = new THREE.Line(geo, this.tracerMat);
-    this.scene.add(line);
-    setTimeout(() => {
-      this.scene.remove(line);
-      geo.dispose();
-    }, 60);
-  }
-
-  /** Melee swing: hurts the nearest enemy or ped within range. */
-  melee(ctx) {
-    if (this.cooldown > 0) return;
-    this.cooldown = 0.45;
-    const pp = ctx.playerPos();
-    let best = null;
-    let bd = CONFIG.player.reach;
-    for (const e of ctx.enemies.list) {
-      const d = Math.hypot(e.pos.x - pp.x, e.pos.z - pp.z);
-      if (d < bd) {
-        bd = d;
-        best = { kind: 'enemy', enemy: e };
-      }
-    }
-    if (!best) {
-      for (const p of ctx.peds.peds) {
-        if (p.state === 'down') continue;
-        const d = Math.hypot(p.pos.x - pp.x, p.pos.z - pp.z);
-        if (d < bd) {
-          bd = d;
-          best = { kind: 'ped', ped: p };
-        }
-      }
-    }
-    if (best) {
-      if (best.kind === 'enemy') {
-        const dead = best.enemy.damage(CONFIG.player.punch);
-        if (dead) {
-          ctx.enemies.remove(best.enemy);
-          this.onHit?.('enemy', best.enemy);
-        }
-      } else {
-        ctx.peds.knockDown(best.ped);
-        this.onHit?.('ped', best.ped);
-      }
-    }
-    this.onShot?.();
-  }
-
-  reload() {
-    if (this.reloading || this.ammo === CONFIG.combat.magazine) return;
-    this.reloading = true;
-    this.reloadTimer = CONFIG.combat.reloadTime;
   }
 
   update(dt) {
-    this.cooldown = Math.max(0, this.cooldown - dt);
+    if (this.dead) return;
+    const G = this.G;
+    const player = G.player;
+    const dx = player.x - this.x;
+    const dz = player.z - this.z;
+    const dist = Math.hypot(dx, dz);
+    this.heading = Math.atan2(dx, dz);
+    // Advance until in range, then strafe to stay a moving target.
+    this.strafeTimer -= dt;
+    if (this.strafeTimer <= 0) {
+      this.strafeTimer = 1.5 + Math.random() * 2;
+      this.strafeDir *= -1;
+    }
+    let mx = 0;
+    let mz = 0;
+    if (dist > 16) {
+      mx = dx / dist;
+      mz = dz / dist;
+    } else {
+      mx = -dz / dist * this.strafeDir * 0.6;
+      mz = dx / dist * this.strafeDir * 0.6;
+    }
+    const speed = dist > 16 ? 5.2 : 2.6;
+    const nx = this.x + mx * speed * dt;
+    const nz = this.z + mz * speed * dt;
+    const c = G.city.collideCircle(nx, nz, 0.9);
+    if (!c.hit) {
+      this.x = nx;
+      this.z = nz;
+    } else {
+      // Blocked: slide along the wall instead of pinning against it.
+      const sx = this.x + mx * speed * dt;
+      if (!G.city.collideCircle(sx, this.z, 0.9).hit) this.x = sx;
+      const sz = this.z + mz * speed * dt;
+      if (!G.city.collideCircle(this.x, sz, 0.9).hit) this.z = sz;
+    }
+    this.walkPhase += dt * speed * 1.5;
+    this.mesh.position.set(this.x, 0, this.z);
+    this.mesh.rotation.y = this.heading;
+    const s = Math.sin(this.walkPhase);
+    const { legL, legR, armL, armR } = this.mesh.userData.limbs;
+    legL.rotation.x = s * 0.6;
+    legR.rotation.x = -s * 0.6;
+    armR.rotation.x = -1.35; // gun raised
+    armL.rotation.x = -0.5;
+    // Face the health bar at the camera.
+    this.barBg.lookAt(G.camera.position);
+    this.barFg.lookAt(G.camera.position);
+    this.barFg.scale.x = clamp(this.health / this.maxHealth, 0, 1);
+    this.barFg.position.x = -(1 - this.barFg.scale.x) * 0.8;
+    // Shoot the player when in range and roughly in the open.
+    this.shootTimer -= dt;
+    if (this.shootTimer <= 0 && dist < CFG.enemyAggroRange && !player.dead) {
+      this.shootTimer = CFG.enemyShootInterval * (0.8 + Math.random() * 0.5);
+      const hitChance = dist < 20 ? 0.55 : 0.3;
+      this.G.fx.muzzle(this.x, 1.7, this.z, this.heading);
+      this.G.audio.enemyShot(dist);
+      if (Math.random() < hitChance) {
+        player.takeDamage(CFG.enemyDamage, 'gunman');
+        this.G.fx.burst(player.x, 1.4, player.z, 0xff3333, 5, 2.5);
+      } else {
+        // Near miss: kick up dust by the player.
+        this.G.fx.burst(
+          player.x + (Math.random() - 0.5) * 3, 0.4, player.z + (Math.random() - 0.5) * 3,
+          0xcccccc, 4, 2,
+        );
+      }
+    }
+  }
+
+  dispose() {
+    this.G.scene.remove(this.mesh);
+  }
+}
+
+export class Combat {
+  constructor(G) {
+    this.G = G;
+    this.ammo = CFG.pistolAmmo;
+    this.reloading = false;
+    this.reloadTimer = 0;
+    this.fireCooldown = 0;
+    this.aiming = false;
+    this.enemies = [];
+    this.lastShotAt = -99;
+    this.raycaster = new THREE.Raycaster();
+    this.crosshairNdc = new THREE.Vector2(0, 0);
+  }
+
+  shotsFiredRecently(seconds) {
+    return this.G.time - this.lastShotAt < seconds;
+  }
+
+  spawnEnemies(pos, count, faction) {
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      const r = 14 + (i % 3) * 7;
+      const x = pos.x + Math.cos(a) * r;
+      const z = pos.z + Math.sin(a) * r;
+      const c = this.G.city.collideCircle(x, z, 1);
+      this.enemies.push(new Enemy(this.G, c.x, c.z, faction));
+    }
+    this.G.hud.toast(`${count} gunmen incoming — take cover and fight back!`);
+  }
+
+  enemiesAlive() {
+    return this.enemies.filter((e) => !e.dead).length;
+  }
+
+  clearEnemies() {
+    for (const e of this.enemies) e.dispose();
+    this.enemies = [];
+  }
+
+  update(dt) {
+    const G = this.G;
+    this.fireCooldown = Math.max(0, this.fireCooldown - dt);
     if (this.reloading) {
       this.reloadTimer -= dt;
       if (this.reloadTimer <= 0) {
         this.reloading = false;
-        this.ammo = CONFIG.combat.magazine;
+        this.ammo = CFG.pistolAmmo;
+        G.hud.toast('Reloaded.');
       }
     }
-  }
-}
-
-/** 2D segment vs AABB test (slab method): does the segment from (x1,z1)
- *  to (x2,z2) cross the box? Used for line-of-sight at chest height —
- *  every solid in the city is taller than a gunman. */
-function segmentHitsBox(x1, z1, x2, z2, b) {
-  const dx = x2 - x1;
-  const dz = z2 - z1;
-  let tMin = 0;
-  let tMax = 1;
-  for (const [p, d, lo, hi] of [[x1, dx, b.minX, b.maxX], [z1, dz, b.minZ, b.maxZ]]) {
-    if (Math.abs(d) < 1e-9) {
-      if (p < lo || p > hi) return false;
-    } else {
-      let t1 = (lo - p) / d;
-      let t2 = (hi - p) / d;
-      if (t1 > t2) {
-        const tmp = t1;
-        t1 = t2;
-        t2 = tmp;
-      }
-      tMin = Math.max(tMin, t1);
-      tMax = Math.min(tMax, t2);
-      if (tMin > tMax) return false;
+    const player = G.player;
+    this.aiming = !player.inCar && !player.dead && G.input.mouseDown;
+    if (G.input.consumeMousePressed() && !player.inCar && !player.dead && G.state === 'playing') {
+      this.tryShoot();
     }
-  }
-  return true;
-}
-
-export class Enemies {
-  constructor(scene, city, rng) {
-    this.scene = scene;
-    this.city = city;
-    this.rng = rng;
-    this.list = [];
-  }
-
-  makeGunman() {
-    const group = new THREE.Group();
-    const vest = new THREE.MeshLambertMaterial({ color: 0x5a2a6a });
-    const pants = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
-    const skin = new THREE.MeshLambertMaterial({ color: 0xc98d64 });
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.85, 0.4), vest);
-    torso.position.y = 1.25;
-    torso.castShadow = true;
-    group.add(torso);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), skin);
-    head.position.y = 1.92;
-    group.add(head);
-    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.7), pants);
-    gun.position.set(0.3, 1.3, 0.35);
-    group.add(gun);
-    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.85, 0.26), pants);
-    legL.position.set(-0.18, 0.42, 0);
-    group.add(legL);
-    const legR = legL.clone();
-    legR.position.x = 0.18;
-    group.add(legR);
-    return group;
-  }
-
-  spawn(count, center) {
-    for (let i = 0; i < count; i++) {
-      const mesh = this.makeGunman();
-      const x = center.x + range(this.rng, -16, 16);
-      const z = center.z + range(this.rng, -16, 16);
-      const pos = new THREE.Vector3(x, 0, z);
-      // Never spawn inside a container or a wall: push out of any solid.
-      this.city.collideCircle(pos, 0.5);
-      mesh.position.copy(pos);
-      this.scene.add(mesh);
-      const enemy = {
-        mesh,
-        pos,
-        health: CONFIG.combat.enemyHealth,
-        shootTimer: range(this.rng, 0.5, 1.5),
-        heading: 0,
-        side: 0, // wall-following direction, picked when the shot is blocked
-        stuckTimer: 0,
-      };
-      enemy.damage = (amount) => {
-        enemy.health -= amount;
-        return enemy.health <= 0;
-      };
-      mesh.userData.enemy = enemy;
-      this.list.push(enemy);
+    if (G.input.pressed('KeyR') && !this.reloading && this.ammo < CFG.pistolAmmo) {
+      this.reloading = true;
+      this.reloadTimer = CFG.pistolReloadSeconds;
+      G.audio.reload();
     }
-  }
-
-  remove(enemy) {
-    const i = this.list.indexOf(enemy);
-    if (i >= 0) this.list.splice(i, 1);
-    this.scene.remove(enemy.mesh);
-  }
-
-  clear() {
-    for (const e of [...this.list]) this.remove(e);
-  }
-
-  /** Does a chest-height line from the enemy to the player clear every solid? */
-  hasLineOfSight(from, to) {
-    for (const b of this.city.buildings) {
-      if (b.h < 1.2) continue;
-      if (segmentHitsBox(from.x, from.z, to.x, to.z, b)) return false;
-    }
-    return true;
-  }
-
-  update(dt, playerPos, onShootPlayer) {
-    for (const e of this.list) {
-      const dx = playerPos.x - e.pos.x;
-      const dz = playerPos.z - e.pos.z;
-      const dist = Math.hypot(dx, dz) || 1;
-      e.heading = Math.atan2(dx, dz);
-      e.mesh.rotation.y = e.heading;
-      const los = this.hasLineOfSight(e.pos, playerPos);
-      // Close in if far, or if cover blocks the shot (a gunman who can't
-      // see the player walks around the container until he can — he never
-      // just stands behind a box shooting through it). Hold and shoot
-      // only when near with a clear line.
-      if (los) e.side = 0;
-      if (dist > 26 || !los) {
-        // Blocked: commit to one way around the obstacle — a straight
-        // push at the player just pins the gunman against the wall, so
-        // he sidesteps diagonally until the shot clears.
-        if (!los && e.stuckTimer <= 0) {
-          e.stuckTimer = 4;
-          if (!e.side) e.side = this.rng() < 0.5 ? 1 : -1;
-        }
-        if (e.stuckTimer > 0) e.stuckTimer -= dt;
-        const moveHeading = !los && e.side !== 0
-          ? e.heading + e.side * 1.1
-          : e.heading;
-        e.pos.x += Math.sin(moveHeading) * CONFIG.combat.enemyChaseSpeed * dt;
-        e.pos.z += Math.cos(moveHeading) * CONFIG.combat.enemyChaseSpeed * dt;
-        this.city.collideCircle(e.pos, 0.5);
-        e.mesh.position.copy(e.pos);
-      }
-      e.shootTimer -= dt;
-      if (e.shootTimer <= 0 && dist < CONFIG.combat.enemyRange && los) {
-        e.shootTimer = CONFIG.combat.enemyShotGap * range(this.rng, 0.8, 1.3);
-        // Inaccurate: only some shots land, fewer at range.
-        if (this.rng() < clamp(0.38 - dist / 160, 0.1, 0.38)) {
-          onShootPlayer?.(CONFIG.combat.enemyDamage);
+    if (G.input.pressed('KeyF')) this.tryMelee();
+    for (const e of this.enemies) e.update(dt);
+    // Clean up long-dead bodies.
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const e = this.enemies[i];
+      if (e.dead) {
+        e.deadTimer = (e.deadTimer || 0) + dt;
+        if (e.deadTimer > 20) {
+          e.dispose();
+          this.enemies.splice(i, 1);
         }
       }
+    }
+    G.hud.setAmmo(this.ammo, this.reloading);
+  }
+
+  tryShoot() {
+    const G = this.G;
+    if (this.fireCooldown > 0 || this.reloading) return;
+    if (this.ammo <= 0) {
+      G.audio.dryFire();
+      G.hud.toast('Out of ammo — press R to reload.');
+      this.reloading = true;
+      this.reloadTimer = CFG.pistolReloadSeconds;
+      return;
+    }
+    this.fireCooldown = CFG.pistolFireInterval;
+    this.ammo--;
+    this.lastShotAt = G.time;
+    const player = G.player;
+    // Aim the player at the crosshair while firing.
+    player.heading = Math.atan2(
+      Math.sin(G.cameraRig.yaw), Math.cos(G.cameraRig.yaw),
+    );
+    const from = new THREE.Vector3(player.x, 1.6, player.z);
+    const dir = new THREE.Vector3();
+    G.camera.getWorldDirection(dir);
+    this.raycaster.set(G.camera.position, dir);
+    this.raycaster.far = CFG.pistolRange;
+    G.fx.muzzle(from.x, from.y, from.z, player.heading);
+    G.audio.shot();
+    G.fx.shake(0.08);
+    G.hud.kickCrosshair();
+    // Crime: firing with police nearby draws heat.
+    if (G.police.nearestChaserDistance() < 60) G.wanted.addCrime('shootNearPolice');
+
+    // Test enemies first — they are the usual target.
+    let hitEnemy = null;
+    let hitDist = Infinity;
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      const dx = e.x - G.camera.position.x;
+      const dz = e.z - G.camera.position.z;
+      const along = dx * dir.x + dz * dir.z;
+      if (along < 0 || along > CFG.pistolRange) continue;
+      const perp = Math.abs(-dx * dir.z + dz * dir.x);
+      const heightDiff = Math.abs(1.4 - (G.camera.position.y + dir.y * along));
+      if (perp < 1.1 && heightDiff < 1.6 && along < hitDist) {
+        hitDist = along;
+        hitEnemy = e;
+      }
+    }
+    if (hitEnemy) {
+      hitEnemy.takeDamage(CFG.pistolDamage);
+      G.hud.hitMarker();
+      return;
+    }
+    // Then pedestrians (a crime), then cars.
+    const ped = G.peds.nearest(
+      G.camera.position.x + dir.x * 12, G.camera.position.z + dir.z * 12, 3.5,
+    );
+    if (ped) {
+      ped.knockDown(10);
+      G.wanted.addCrime('hurtPedestrian');
+      G.hud.hitMarker();
+      return;
+    }
+    const cars = [...G.traffic.cars, ...G.police.cars, ...G.parkedCars];
+    for (const car of cars) {
+      if (car.dead) continue;
+      const dx = car.x - G.camera.position.x;
+      const dz = car.z - G.camera.position.z;
+      const along = dx * dir.x + dz * dir.z;
+      if (along < 0 || along > CFG.pistolRange) continue;
+      const perp = Math.abs(-dx * dir.z + dz * dir.x);
+      if (perp < 2.2) {
+        car.damage(CFG.pistolDamage * 0.6);
+        G.fx.sparks(car.x, 1, car.z, 5);
+        if (car.isPolice) G.wanted.addCrime('hurtPolice');
+        G.hud.hitMarker();
+        return;
+      }
+    }
+    // Miss: show the impact point so shots feel real.
+    const end = G.camera.position.clone().add(dir.multiplyScalar(40));
+    G.fx.burst(end.x, Math.max(0.3, end.y), end.z, 0xaaaaaa, 3, 2);
+  }
+
+  tryMelee() {
+    const G = this.G;
+    const player = G.player;
+    if (player.inCar || player.dead) return;
+    G.audio.punch();
+    const fx = Math.sin(player.heading);
+    const fz = Math.cos(player.heading);
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      const dx = e.x - player.x;
+      const dz = e.z - player.z;
+      const d = Math.hypot(dx, dz);
+      if (d < CFG.meleeRange && (dx * fx + dz * fz) > 0) {
+        e.takeDamage(CFG.meleeDamage);
+        e.x += fx * 1.5;
+        e.z += fz * 1.5;
+        G.hud.hitMarker();
+        return;
+      }
+    }
+    const ped = G.peds.nearest(player.x + fx * 2, player.z + fz * 2, 2);
+    if (ped) {
+      ped.knockDown(5);
+      G.wanted.addCrime('hurtPedestrian');
     }
   }
 }

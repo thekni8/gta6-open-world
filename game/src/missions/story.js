@@ -1,83 +1,89 @@
-// The story of Meridian Bay: Kai Mercer, a driver-for-hire, pulled into
-// a turf war between the Harbor Kings (dockside smugglers) and the Vesper
-// Syndicate (nightclub money). Five missions, all original names, crews,
-// and places.
+// The Meridian Bay story: Kai Mercer, driver-for-hire, caught between the
+// Harbor Kings and the Vesper Syndicate. Five missions, each a short arc of
+// stages; the manager turns these definitions into live objectives.
 
-export const STORY = {
-  hero: 'Kai Mercer',
-  crews: {
-    harbor: 'Harbor Kings',
-    vesper: 'Vesper Syndicate',
+import { LANDMARKS, CFG } from '../config.js';
+
+export const CREWS = {
+  harbor: {
+    name: 'Harbor Kings',
+    color: '#1abc9c',
+    blurb: 'Dockside smugglers who run the port. Loyal to their drivers, ruthless to rivals.',
   },
-  intro:
-    'Meridian Bay. You are Kai Mercer, a driver-for-hire with a fast car and slow rent. Two crews want you — and tonight, both of them are calling.',
+  vesper: {
+    name: 'Vesper Syndicate',
+    color: '#9b59b6',
+    blurb: 'Nightclub money with a clean front and dirty books. They own half of downtown after dark.',
+  },
 };
 
 export const MISSIONS = [
   {
-    id: 'delivery',
-    title: 'Mission 1 — First Delivery',
-    intro: 'Rook of the Harbor Kings needs a package at the marina. Drive it there. No questions, no stops.',
-    outro: 'Package delivered. Rook is impressed — and the Kings now know your name.',
-    objective: 'Drive to the marina marker',
-    reward: 400,
-    type: 'reach',
-    target: 'marina',
-    timeLimit: 150,
+    id: 0,
+    title: 'First Delivery',
+    giver: 'Harbor Kings',
+    briefing: 'The Kings need a driver they can trust. Pick up the crate at the port and get it downtown — no questions, no stops.',
+    outro: 'Clean run. The Kings are watching you now, Kai — and so is the Syndicate.',
+    reward: CFG.missionRewards[0],
+    stages: [
+      { type: 'goto', label: 'Pick up the crate at Meridian Port', pos: { x: 225, z: 60 }, radius: 10 },
+      { type: 'goto', label: 'Deliver the crate downtown', pos: { x: 30, z: -30 }, radius: 10 },
+    ],
   },
   {
-    id: 'borrowed',
-    title: 'Mission 2 — Borrowed Wheels',
-    intro: 'The Kings want a Vesper courier car — gold paint, downtown. Take it, and bring it to the safehouse garage.',
-    outro: 'The courier car is theirs now. The Vesper Syndicate will remember this.',
-    objective: 'Steal the gold car, then deliver it to the safehouse',
-    reward: 600,
-    type: 'steal-deliver',
-    target: 'downtown',
-    deliverTo: 'safehouse',
-    timeLimit: 240,
+    id: 1,
+    title: 'Borrowed Wheels',
+    giver: 'Harbor Kings',
+    briefing: 'A Syndicate courier left a tuned coupe parked downtown. Take it — quietly if you can — and bring it to the Kings\' garage.',
+    outro: 'Nice wheels. The Syndicate will want them back. Let them try.',
+    reward: CFG.missionRewards[1],
+    stages: [
+      { type: 'steal', label: 'Steal the Syndicate coupe downtown', pos: { x: 90, z: 90 }, radius: 6, carColor: 0x8e44ad, carKind: 'sedan' },
+      { type: 'deliver', label: 'Drive the coupe to the Harbor Kings garage', pos: { x: LANDMARKS.garage.x, z: LANDMARKS.garage.z }, radius: 12 },
+    ],
   },
   {
-    id: 'pursuit',
-    title: 'Mission 3 — Hot Pursuit',
-    intro: 'Meridian Bay PD is on you — three stars and climbing. Lose them, then slip away to the old park.',
-    outro: 'You ghosted the whole department. Word travels fast in this city.',
-    objective: 'Lose the police, then reach the park hideout',
-    reward: 900,
-    type: 'escape',
-    target: 'park',
-    timeLimit: 240,
-    wantedOnStart: 3,
+    id: 2,
+    title: 'Heat Run',
+    giver: 'Harbor Kings',
+    briefing: 'The drop is hot — the PD is already rolling. Hit all three checkpoints across the bay, then shake the heat. Lose them and you\'re golden.',
+    outro: 'Three checkpoints, half the force behind you, and you still walked away. Legend.',
+    reward: CFG.missionRewards[2],
+    stages: [
+      { type: 'goto', label: 'Reach the Bayfront checkpoint', pos: { x: 0, z: 210 }, radius: 12, wantedOnEnter: 3 },
+      { type: 'goto', label: 'Reach the Westside checkpoint', pos: { x: -180, z: 0 }, radius: 12 },
+      { type: 'goto', label: 'Reach the Old Town checkpoint', pos: { x: 0, z: -180 }, radius: 12 },
+      { type: 'escape', label: 'Lose the cops — lay low at the spray shop or outrun them', pos: { x: LANDMARKS.sprayShop.x, z: LANDMARKS.sprayShop.z }, radius: 14 },
+    ],
   },
   {
-    id: 'ambush',
-    title: 'Mission 4 — Port Ambush',
-    intro: 'Vesper gunmen are waiting at the container port. Rook wants them gone. Take them all down.',
-    outro: 'The port is quiet. The Kings own the docks tonight.',
-    objective: 'Eliminate the Vesper gunmen at the port (0/6)',
-    reward: 1200,
-    type: 'eliminate',
-    target: 'port',
-    enemies: 6,
-    timeLimit: 300,
+    id: 3,
+    title: 'Port Ambush',
+    giver: 'Harbor Kings',
+    briefing: 'The Syndicate is moving on the port tonight. Hold the docks, Kai — nobody else is coming.',
+    outro: 'The port is ours. The Syndicate just declared war, and you just answered.',
+    reward: CFG.missionRewards[3],
+    stages: [
+      { type: 'goto', label: 'Get to the docks at Meridian Port', pos: { x: 225, z: 120 }, radius: 14 },
+      { type: 'killAll', label: 'Defeat the Vesper gunmen at the port', pos: { x: 225, z: 120 }, radius: 30, enemies: 6 },
+    ],
   },
   {
-    id: 'choice',
-    title: 'Mission 5 — The Choice',
-    intro: 'Both crews meet downtown at midnight. Vesper brought an army. End it — then choose who you drive for.',
-    outro: '',
-    objective: 'Clear the downtown meeting point (0/8)',
-    reward: 2500,
-    type: 'eliminate-choice',
-    target: 'downtown',
-    enemies: 8,
-    timeLimit: 420,
+    id: 4,
+    title: 'The Choice',
+    giver: 'Both crews',
+    briefing: 'Both crews want you — tonight, at the plaza. Pick a side, then get to their hideout alive. The other crew will not take it well.',
+    outro: 'Meridian Bay has a new name on its streets: Kai Mercer. The city is yours now.',
+    reward: CFG.missionRewards[4],
+    stages: [
+      { type: 'goto', label: 'Meet both crews at Meridian Plaza', pos: { x: LANDMARKS.plaza.x, z: LANDMARKS.plaza.z }, radius: 10 },
+      { type: 'choice', label: 'Choose your crew', pos: { x: LANDMARKS.plaza.x, z: LANDMARKS.plaza.z }, radius: 10 },
+      { type: 'escapeTo', label: 'Reach your crew\'s hideout alive', pos: null, radius: 14, enemies: 4 },
+    ],
   },
 ];
 
-export const ENDINGS = {
-  harbor:
-    'You drive for the Harbor Kings. The docks, the boats, the whole bay — yours to run. Meridian Bay is yours, Kai.',
-  vesper:
-    'You drive for the Vesper Syndicate. Neon nights, club money, and a city that never sleeps. Meridian Bay is yours, Kai.',
+export const HIDEOUTS = {
+  harbor: { x: 210, z: 210, name: 'Harbor Kings Hideout' },
+  vesper: { x: -210, z: -150, name: 'Vesper Club Hideout' },
 };

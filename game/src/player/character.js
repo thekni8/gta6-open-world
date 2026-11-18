@@ -1,135 +1,202 @@
-// Kai Mercer on foot: a low-poly figure — rust jacket, dark jeans, cap —
-// with arcade movement (WASD relative to the camera, Shift to sprint),
-// health, and a walk cycle with swinging limbs and a bobbing torso.
+// Kai Mercer on foot: movement, walk-cycle animation, health and entering
+// or leaving cars. The mesh is a low-poly figure built from boxes — shirt,
+// jeans, skin and hair — with legs that swing while he walks.
 
-import * as THREE from 'three';
-import { CONFIG } from '../config.js';
+import { CFG } from '../config.js';
+import { clamp, angleLerp } from '../util/random.js';
 
-function limb(w, h, d, mat, y) {
-  const pivot = new THREE.Group();
-  pivot.position.y = y;
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  mesh.position.y = -h / 2;
-  mesh.castShadow = true;
-  pivot.add(mesh);
-  return pivot;
+const THREE = window.THREE;
+
+export function buildPersonMesh(shirtColor, skinColor, hairColor) {
+  const group = new THREE.Group();
+  const skin = new THREE.MeshLambertMaterial({ color: skinColor });
+  const shirt = new THREE.MeshLambertMaterial({ color: shirtColor });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x2c3e50 });
+  const hair = new THREE.MeshLambertMaterial({ color: hairColor });
+
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.95, 0.42), shirt);
+  torso.position.y = 1.18;
+  torso.castShadow = true;
+  group.add(torso);
+
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.5, 0.44), skin);
+  head.position.y = 1.95;
+  head.castShadow = true;
+  group.add(head);
+
+  const hairTop = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.48), hair);
+  hairTop.position.y = 2.24;
+  group.add(hairTop);
+
+  const legGeo = new THREE.BoxGeometry(0.3, 0.75, 0.34);
+  const legL = new THREE.Mesh(legGeo, pants);
+  legL.position.set(-0.21, 0.38, 0);
+  legL.geometry = legGeo.clone();
+  legL.geometry.translate(0, -0.32, 0);
+  legL.position.y = 0.72;
+  legL.castShadow = true;
+  group.add(legL);
+  const legR = new THREE.Mesh(legGeo, pants);
+  legR.geometry = legGeo.clone();
+  legR.geometry.translate(0, -0.32, 0);
+  legR.position.set(0.21, 0.72, 0);
+  legR.castShadow = true;
+  group.add(legR);
+
+  const armGeo = new THREE.BoxGeometry(0.22, 0.8, 0.26);
+  const armL = new THREE.Mesh(armGeo, shirt);
+  armL.geometry = armGeo.clone();
+  armL.geometry.translate(0, -0.34, 0);
+  armL.position.set(-0.52, 1.6, 0);
+  group.add(armL);
+  const armR = new THREE.Mesh(armGeo, shirt);
+  armR.geometry = armGeo.clone();
+  armR.geometry.translate(0, -0.34, 0);
+  armR.position.set(0.52, 1.6, 0);
+  group.add(armR);
+
+  group.userData.limbs = { legL, legR, armL, armR };
+  return group;
 }
 
 export class Character {
-  constructor(scene) {
-    this.group = new THREE.Group();
-    this.health = CONFIG.player.health;
-    this.heading = 0;
+  constructor(G, x, z) {
+    this.G = G;
+    this.x = x;
+    this.z = z;
+    this.heading = 0; // radians; 0 faces -z... we use atan2(dx, dz) convention
     this.speed = 0;
+    this.health = CFG.playerHealth;
+    this.maxHealth = CFG.playerHealth;
+    this.inCar = null;
     this.walkPhase = 0;
-    this.alive = true;
-    this.pos = new THREE.Vector3(128, 0, 224);
-
-    const skin = new THREE.MeshLambertMaterial({ color: 0xc98d64 });
-    const jacket = new THREE.MeshLambertMaterial({ color: 0xb84a32 });
-    const jeans = new THREE.MeshLambertMaterial({ color: 0x2a3550 });
-    const cap = new THREE.MeshLambertMaterial({ color: 0x274a6a });
-    const shoe = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
-
-    // Torso
-    this.torso = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.85, 0.42), jacket);
-    this.torso.position.y = 1.26;
-    this.torso.castShadow = true;
-    this.group.add(this.torso);
-    // Head + cap
-    this.head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), skin);
-    this.head.position.y = 1.93;
-    this.head.castShadow = true;
-    this.group.add(this.head);
-    const capTop = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.13, 0.46), cap);
-    capTop.position.y = 2.18;
-    this.group.add(capTop);
-    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 0.24), cap);
-    brim.position.set(0, 2.13, 0.3);
-    this.group.add(brim);
-    // Arms, pivoted at the shoulder
-    this.armL = limb(0.22, 0.78, 0.22, jacket, 1.62);
-    this.armL.position.x = -0.47;
-    this.group.add(this.armL);
-    this.armR = limb(0.22, 0.78, 0.22, jacket, 1.62);
-    this.armR.position.x = 0.47;
-    this.group.add(this.armR);
-    // Legs, pivoted at the hip, with shoe blocks at the bottom
-    this.legL = limb(0.26, 0.85, 0.26, jeans, 0.85);
-    this.legL.position.x = -0.18;
-    const shoeL = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.44), shoe);
-    shoeL.position.set(0, -0.82, 0.08);
-    this.legL.add(shoeL);
-    this.group.add(this.legL);
-    this.legR = limb(0.26, 0.85, 0.26, jeans, 0.85);
-    this.legR.position.x = 0.18;
-    const shoeR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.44), shoe);
-    shoeR.position.set(0, -0.82, 0.08);
-    this.legR.add(shoeR);
-    this.group.add(this.legR);
-
-    this.group.position.copy(this.pos);
-    scene.add(this.group);
+    this.lastDamageAt = -99;
+    this.dead = false;
+    this.mesh = buildPersonMesh(0x1abc9c, 0xc68642, 0x1a1a1a);
+    this.mesh.position.set(x, 0, z);
+    G.scene.add(this.mesh);
   }
 
-  /** Move on foot. axis = {x: strafe, y: forward} in camera space. */
-  update(dt, axis, camYaw, sprinting, city) {
-    if (!this.alive) return;
-    const moving = axis.x !== 0 || axis.y !== 0;
-    const target = moving ? (sprinting ? CONFIG.player.sprint : CONFIG.player.walk) : 0;
-    this.speed += (target - this.speed) * Math.min(1, dt * 10);
-    if (this.speed > 0.1) {
-      // Camera-relative direction: camera yaw 0 looks toward -Z.
-      const sin = Math.sin(camYaw);
-      const cos = Math.cos(camYaw);
-      const dx = -sin * axis.y + cos * axis.x;
-      const dz = -cos * axis.y - sin * axis.x;
-      const len = Math.hypot(dx, dz) || 1;
-      this.pos.x += (dx / len) * this.speed * dt;
-      this.pos.z += (dz / len) * this.speed * dt;
-      this.heading = Math.atan2(dx, dz);
-      city.collideCircle(this.pos, CONFIG.player.radius);
-      this.walkPhase += dt * this.speed * 1.7;
+  get position() {
+    return { x: this.x, z: this.z };
+  }
+
+  update(dt, input, cameraYaw) {
+    if (this.dead || this.inCar) return;
+    const G = this.G;
+    // Movement relative to the camera yaw: W walks away from the camera,
+    // D strafes to the camera's right. Forward is (sin yaw, cos yaw) and
+    // right is (-cos yaw, sin yaw) in world xz.
+    const fwd = (input.isDown('KeyW') ? 1 : 0) - (input.isDown('KeyS') ? 1 : 0);
+    const right = (input.isDown('KeyD') ? 1 : 0) - (input.isDown('KeyA') ? 1 : 0);
+    const moving = fwd !== 0 || right !== 0;
+    const sprint = input.isDown('ShiftLeft') || input.isDown('ShiftRight');
+    const topSpeed = sprint ? CFG.sprintSpeed : CFG.walkSpeed;
+    if (moving) {
+      const len = Math.hypot(fwd, right);
+      const f = fwd / len;
+      const r = right / len;
+      const sin = Math.sin(cameraYaw);
+      const cos = Math.cos(cameraYaw);
+      const wx = sin * f - cos * r;
+      const wz = cos * f + sin * r;
+      const targetHeading = Math.atan2(wx, wz);
+      this.heading = angleLerp(this.heading, targetHeading, Math.min(1, dt * 12));
+      this.speed = lerpSpeed(this.speed, topSpeed, dt * 8);
+      this.x += wx * this.speed * dt;
+      this.z += wz * this.speed * dt;
+      this.walkPhase += dt * this.speed * 1.35;
+      if (Math.sin(this.walkPhase) > 0.96 && this.speed > 3) {
+        G.audio.footstep();
+      }
+    } else {
+      this.speed = lerpSpeed(this.speed, 0, dt * 10);
+      this.walkPhase *= 0.9;
     }
-    // Walk cycle: legs and arms swing in opposition, torso bobs.
-    const swing = Math.min(1, this.speed / CONFIG.player.walk) * 0.62;
+    // World bounds + building collision.
+    this.x = clamp(this.x, -CFG.cityBound, CFG.cityBound);
+    this.z = clamp(this.z, -CFG.cityBound, CFG.cityBound + 60);
+    const c = G.city.collideCircle(this.x, this.z, CFG.playerRadius);
+    this.x = c.x;
+    this.z = c.z;
+    // Health regen after a calm stretch.
+    if (G.time - this.lastDamageAt > CFG.healthRegenDelay && this.health < this.maxHealth) {
+      this.health = Math.min(this.maxHealth, this.health + CFG.healthRegenRate * dt);
+    }
+    this.syncMesh(dt, moving);
+  }
+
+  syncMesh(dt, moving) {
+    const m = this.mesh;
+    m.position.set(this.x, 0, this.z);
+    m.rotation.y = this.heading;
+    const swing = moving ? Math.min(1, this.speed / CFG.walkSpeed) * 0.75 : 0;
     const s = Math.sin(this.walkPhase);
-    this.legL.rotation.x = s * swing;
-    this.legR.rotation.x = -s * swing;
-    this.armL.rotation.x = -s * swing * 0.8;
-    this.armR.rotation.x = s * swing * 0.8;
-    const bob = Math.abs(Math.cos(this.walkPhase)) * 0.05 * Math.min(1, this.speed / 4);
-    this.torso.position.y = 1.26 + bob;
-    this.group.position.copy(this.pos);
-    this.group.rotation.y = this.heading;
-  }
-
-  /** Take damage; returns true if Kai went down. */
-  damage(amount) {
-    if (!this.alive) return false;
-    this.health = Math.max(0, this.health - amount);
-    if (this.health <= 0) {
-      this.alive = false;
-      this.group.rotation.x = -Math.PI / 2; // fall flat
-      this.group.position.y = 0.4;
-      return true;
+    const { legL, legR, armL, armR } = m.userData.limbs;
+    legL.rotation.x = s * swing;
+    legR.rotation.x = -s * swing;
+    armL.rotation.x = -s * swing * 0.8;
+    armR.rotation.x = s * swing * 0.8;
+    if (this.G.combat && this.G.combat.aiming) {
+      armR.rotation.x = -1.35; // pistol raised
+      armL.rotation.x = -0.6;
     }
-    return false;
+    m.visible = !this.inCar;
   }
 
-  heal(amount) {
-    this.health = Math.min(CONFIG.player.health, this.health + amount);
+  enterCar(car) {
+    this.inCar = car;
+    car.driver = 'player';
+    this.mesh.visible = false;
   }
 
-  respawn(x, z) {
-    this.pos.set(x, 0, z);
-    this.health = CONFIG.player.health;
-    this.alive = true;
-    this.group.rotation.x = 0;
-    this.group.position.copy(this.pos);
+  exitCar() {
+    if (!this.inCar) return;
+    const car = this.inCar;
+    const side = 2.8;
+    const px = car.x + Math.cos(car.heading) * side;
+    const pz = car.z - Math.sin(car.heading) * side;
+    const c = this.G.city.collideCircle(px, pz, CFG.playerRadius);
+    this.x = c.x;
+    this.z = c.z;
+    this.heading = car.heading;
+    this.inCar = null;
+    car.driver = 'none';
+    this.mesh.visible = true;
+    this.mesh.position.set(this.x, 0, this.z);
   }
 
-  setVisible(v) {
-    this.group.visible = v;
+  takeDamage(amount, source) {
+    if (this.dead) return;
+    this.health -= amount;
+    this.lastDamageAt = this.G.time;
+    this.G.fx.shake(0.25);
+    this.G.hud.damageFlash();
+    this.G.audio.hurt();
+    if (this.health <= 0) {
+      this.health = 0;
+      this.dead = true;
+      this.G.onPlayerDied(source);
+    }
   }
+
+  healFull() {
+    this.health = this.maxHealth;
+    this.dead = false;
+  }
+
+  teleport(x, z) {
+    this.x = x;
+    this.z = z;
+    this.mesh.position.set(x, 0, z);
+    if (this.inCar) {
+      this.inCar.x = x;
+      this.inCar.z = z;
+      this.inCar.syncMesh();
+    }
+  }
+}
+
+function lerpSpeed(current, target, t) {
+  return current + (target - current) * Math.min(1, t);
 }
