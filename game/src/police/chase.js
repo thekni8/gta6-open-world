@@ -53,11 +53,14 @@ export class Police {
     return CONFIG.police.fleet[clamp(stars, 0, 5)];
   }
 
-  spawnNear(playerPos, minDist = 45) {
-    // Spawn on a road ring around the player.
+  spawnNear(playerPos, minDist = 80) {
+    // Spawn on a road ring around the player, beyond police sight (58 m),
+    // so a fresh interceptor has to close in — and a player who keeps
+    // outrunning the fleet can genuinely lose it. Presets pass a small
+    // minDist to stage interceptors right behind the getaway.
     for (let tries = 0; tries < 12; tries++) {
       const angle = this.rng() * Math.PI * 2;
-      const dist = range(this.rng, minDist, minDist + 40);
+      const dist = range(this.rng, minDist, minDist + 60);
       const x = playerPos.x + Math.sin(angle) * dist;
       const z = playerPos.z + Math.cos(angle) * dist;
       const road = this.city.nearestRoad(x, z);
@@ -140,6 +143,7 @@ export class Police {
       this.roadblock(playerPos, playerHeading);
       this.blockTimer = CONFIG.police.roadblockCooldown;
     }
+    const retire = []; // chasers that lost the trail this frame
     for (const car of this.cars) {
       car.lightRed.visible = flash;
       car.lightBlue.visible = !flash;
@@ -173,12 +177,17 @@ export class Police {
         car.pos.x -= Math.sin(car.heading) * 1.2;
         car.pos.z -= Math.cos(car.heading) * 1.2;
       }
-      // Give up if hopelessly far away: respawn near the player.
-      if (dist > 260) {
-        const road = this.city.nearestRoad(playerPos.x, playerPos.z);
-        car.pos.set(road.x, 0, road.z);
-        car.speed = 0;
+      // Give up if hopelessly far behind: the interceptor lost the trail
+      // and leaves. (Respawning it beside the player would make escape
+      // impossible — the fleet already tops itself up from the spawn ring
+      // while stars remain, so pressure stays on without a rubber band.)
+      if (dist > 350) {
+        retire.push(car);
       }
+    }
+    for (const car of retire) {
+      car.remove();
+      this.cars.splice(this.cars.indexOf(car), 1);
     }
     // Drop blockers once the heat is gone.
     if (stars < CONFIG.police.roadblockStars) {

@@ -62,14 +62,17 @@ export class Daylight {
     this.dome = dome;
 
     // Low sun, warm and strong: long shadows across the streets.
+    // The shadow camera is a tight box around the player (it travels with
+    // the sun in follow()), so a 1024 map still gives crisp shadows near
+    // the action while the far city — already fogged — goes unshadowed.
     this.sun = new THREE.DirectionalLight(CONFIG.palette.sun, 3.2);
     this.sun.position.set(-230, 120, 75);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.left = -290;
-    this.sun.shadow.camera.right = 290;
-    this.sun.shadow.camera.top = 290;
-    this.sun.shadow.camera.bottom = -290;
+    this.sun.shadow.mapSize.set(1024, 1024);
+    this.sun.shadow.camera.left = -130;
+    this.sun.shadow.camera.right = 130;
+    this.sun.shadow.camera.top = 130;
+    this.sun.shadow.camera.bottom = -130;
     this.sun.shadow.camera.far = 720;
     this.sun.shadow.bias = -0.0006;
     scene.add(this.sun);

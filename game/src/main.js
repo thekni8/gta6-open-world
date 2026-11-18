@@ -45,13 +45,23 @@ class Game {
     this.shotTimer = 0;
     this.chaseBlockerStaged = false;
 
+    // Test hooks (never part of normal play): ?fast=1 drops shadows and
+    // tone mapping so the game runs fast in a software renderer, and
+    // ?speed=N advances N× game time per frame so long missions can be
+    // play-tested in minutes. Screenshots always use the full-quality path.
+    const params = new URLSearchParams(window.location.search);
+    this.fastMode = params.get('fast') === '1';
+    this.timeScale = Math.max(1, Math.min(8, Number(params.get('speed')) || 1));
+
     const canvas = $('game');
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    // Fast mode also drops antialiasing: MSAA is pure fill cost in a
+    // software renderer, and test frames don't need smooth edges.
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !this.fastMode });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = !this.fastMode;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMapping = this.fastMode ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.08;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1400);
@@ -119,6 +129,39 @@ class Game {
       enemies: () => this.enemies.list.length,
       police: () => this.police.cars.length,
       ammo: () => this.weapons.ammo,
+      // Test-only helpers (play-testing in a headless browser): move Kai
+      // or his car, turn toward the nearest gunman, and patch health up.
+      teleport: (x, z) => {
+        if (this.playerCar) {
+          this.playerCar.pos.set(x, 0, z);
+          this.playerCar.group.position.copy(this.playerCar.pos);
+          this.playerCar.speed = 0;
+        } else {
+          this.player.pos.set(x, 0, z);
+          this.player.group.position.copy(this.player.pos);
+        }
+      },
+      faceNearestEnemy: () => {
+        const pp = this.playerPos();
+        let best = null;
+        let bd = Infinity;
+        for (const e of this.enemies.list) {
+          const d = Math.hypot(e.pos.x - pp.x, e.pos.z - pp.z);
+          if (d < bd) {
+            bd = d;
+            best = e;
+          }
+        }
+        if (!best) return false;
+        const dx = best.pos.x - pp.x;
+        const dz = best.pos.z - pp.z;
+        this.player.heading = Math.atan2(dx, dz);
+        this.followCam.yaw = Math.atan2(-dx, -dz);
+        return true;
+      },
+      setHealth: (n) => {
+        this.player.health = n;
+      },
     };
     window.__ready = false;
 
@@ -606,7 +649,7 @@ class Game {
 
   // ---- per-frame --------------------------------------------------------------
   tick() {
-    const dt = Math.min(this.clock.getDelta(), 0.05);
+    const dt = Math.min(this.clock.getDelta(), 0.05) * this.timeScale;
     const input = this.input.poll();
     this.followCam.orbit(input.dx, input.dy);
 
