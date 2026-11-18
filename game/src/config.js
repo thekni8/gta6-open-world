@@ -59,8 +59,8 @@ export const CFG = {
   meleeDamage: 25,
   meleeRange: 2.6,
   enemyHealth: 60,
-  enemyDamage: 9,
-  enemyShootInterval: 1.9,
+  enemyDamage: 7,
+  enemyShootInterval: 2.4,
   enemyAggroRange: 45,
 
   // People.

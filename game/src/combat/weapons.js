@@ -110,7 +110,7 @@ class Enemy {
     this.shootTimer -= dt;
     if (this.shootTimer <= 0 && dist < CFG.enemyAggroRange && !player.dead) {
       this.shootTimer = CFG.enemyShootInterval * (0.8 + Math.random() * 0.5);
-      const hitChance = dist < 20 ? 0.55 : 0.3;
+      const hitChance = dist < 20 ? 0.42 : 0.24;
       this.G.fx.muzzle(this.x, 1.7, this.z, this.heading);
       this.G.audio.enemyShot(dist);
       if (Math.random() < hitChance) {
@@ -129,6 +129,21 @@ class Enemy {
   dispose() {
     this.G.scene.remove(this.mesh);
   }
+}
+
+// Distance from a point to a ray (origin + normalized direction), plus how
+// far along the ray the closest point sits. Null when the point is behind.
+function rayDistanceToPoint(origin, dir, px, py, pz) {
+  const ox = px - origin.x;
+  const oy = py - origin.y;
+  const oz = pz - origin.z;
+  const along = ox * dir.x + oy * dir.y + oz * dir.z;
+  if (along < 0) return null;
+  const cx = origin.x + dir.x * along;
+  const cy = origin.y + dir.y * along;
+  const cz = origin.z + dir.z * along;
+  const dist = Math.hypot(px - cx, py - cy, pz - cz);
+  return { dist, along };
 }
 
 export class Combat {
@@ -237,19 +252,18 @@ export class Combat {
     // Crime: firing with police nearby draws heat.
     if (G.police.nearestChaserDistance() < 60) G.wanted.addCrime('shootNearPolice');
 
-    // Test enemies first — they are the usual target.
+    // Test enemies first — they are the usual target. A true 3D test: the
+    // distance from the enemy's chest to the crosshair ray. Wherever the
+    // crosshair points, the bullet goes — no flat-ground approximation.
+    const camPos = G.camera.position;
     let hitEnemy = null;
     let hitDist = Infinity;
     for (const e of this.enemies) {
       if (e.dead) continue;
-      const dx = e.x - G.camera.position.x;
-      const dz = e.z - G.camera.position.z;
-      const along = dx * dir.x + dz * dir.z;
-      if (along < 0 || along > CFG.pistolRange) continue;
-      const perp = Math.abs(-dx * dir.z + dz * dir.x);
-      const heightDiff = Math.abs(1.4 - (G.camera.position.y + dir.y * along));
-      if (perp < 1.1 && heightDiff < 1.6 && along < hitDist) {
-        hitDist = along;
+      const d = rayDistanceToPoint(camPos, dir, e.x, 1.4, e.z);
+      if (d === null || d.along > CFG.pistolRange) continue;
+      if (d.dist < 1.5 && d.along < hitDist) {
+        hitDist = d.along;
         hitEnemy = e;
       }
     }
@@ -271,12 +285,9 @@ export class Combat {
     const cars = [...G.traffic.cars, ...G.police.cars, ...G.parkedCars];
     for (const car of cars) {
       if (car.dead) continue;
-      const dx = car.x - G.camera.position.x;
-      const dz = car.z - G.camera.position.z;
-      const along = dx * dir.x + dz * dir.z;
-      if (along < 0 || along > CFG.pistolRange) continue;
-      const perp = Math.abs(-dx * dir.z + dz * dir.x);
-      if (perp < 2.2) {
+      const d = rayDistanceToPoint(camPos, dir, car.x, 1.0, car.z);
+      if (d === null || d.along > CFG.pistolRange) continue;
+      if (d.dist < 2.4) {
         car.damage(CFG.pistolDamage * 0.6);
         G.fx.sparks(car.x, 1, car.z, 5);
         if (car.isPolice) G.wanted.addCrime('hurtPolice');
