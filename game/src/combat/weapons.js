@@ -175,6 +175,33 @@ export class Weapons {
   }
 }
 
+/** 2D segment vs AABB test (slab method): does the segment from (x1,z1)
+ *  to (x2,z2) cross the box? Used for line-of-sight at chest height —
+ *  every solid in the city is taller than a gunman. */
+function segmentHitsBox(x1, z1, x2, z2, b) {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  let tMin = 0;
+  let tMax = 1;
+  for (const [p, d, lo, hi] of [[x1, dx, b.minX, b.maxX], [z1, dz, b.minZ, b.maxZ]]) {
+    if (Math.abs(d) < 1e-9) {
+      if (p < lo || p > hi) return false;
+    } else {
+      let t1 = (lo - p) / d;
+      let t2 = (hi - p) / d;
+      if (t1 > t2) {
+        const tmp = t1;
+        t1 = t2;
+        t2 = tmp;
+      }
+      tMin = Math.max(tMin, t1);
+      tMax = Math.min(tMax, t2);
+      if (tMin > tMax) return false;
+    }
+  }
+  return true;
+}
+
 export class Enemies {
   constructor(scene, city, rng) {
     this.scene = scene;
@@ -212,11 +239,14 @@ export class Enemies {
       const mesh = this.makeGunman();
       const x = center.x + range(this.rng, -16, 16);
       const z = center.z + range(this.rng, -16, 16);
-      mesh.position.set(x, 0, z);
+      const pos = new THREE.Vector3(x, 0, z);
+      // Never spawn inside a container or a wall: push out of any solid.
+      this.city.collideCircle(pos, 0.5);
+      mesh.position.copy(pos);
       this.scene.add(mesh);
       const enemy = {
         mesh,
-        pos: new THREE.Vector3(x, 0, z),
+        pos,
         health: CONFIG.combat.enemyHealth,
         shootTimer: range(this.rng, 0.5, 1.5),
         heading: 0,
@@ -240,6 +270,15 @@ export class Enemies {
     for (const e of [...this.list]) this.remove(e);
   }
 
+  /** Does a chest-height line from the enemy to the player clear every solid? */
+  hasLineOfSight(from, to) {
+    for (const b of this.city.buildings) {
+      if (b.h < 1.2) continue;
+      if (segmentHitsBox(from.x, from.z, to.x, to.z, b)) return false;
+    }
+    return true;
+  }
+
   update(dt, playerPos, onShootPlayer) {
     for (const e of this.list) {
       const dx = playerPos.x - e.pos.x;
@@ -247,15 +286,19 @@ export class Enemies {
       const dist = Math.hypot(dx, dz) || 1;
       e.heading = Math.atan2(dx, dz);
       e.mesh.rotation.y = e.heading;
-      // Close in if far, hold ground and shoot if near.
-      if (dist > 26) {
+      const los = this.hasLineOfSight(e.pos, playerPos);
+      // Close in if far, or if cover blocks the shot (a gunman who can't
+      // see the player walks around the container until he can — he never
+      // just stands behind a box shooting through it). Hold and shoot
+      // only when near with a clear line.
+      if (dist > 26 || !los) {
         e.pos.x += Math.sin(e.heading) * CONFIG.combat.enemyChaseSpeed * dt;
         e.pos.z += Math.cos(e.heading) * CONFIG.combat.enemyChaseSpeed * dt;
         this.city.collideCircle(e.pos, 0.5);
         e.mesh.position.copy(e.pos);
       }
       e.shootTimer -= dt;
-      if (e.shootTimer <= 0 && dist < CONFIG.combat.enemyRange) {
+      if (e.shootTimer <= 0 && dist < CONFIG.combat.enemyRange && los) {
         e.shootTimer = CONFIG.combat.enemyShotGap * range(this.rng, 0.8, 1.3);
         // Inaccurate: only some shots land, fewer at range.
         if (this.rng() < clamp(0.38 - dist / 160, 0.1, 0.38)) {

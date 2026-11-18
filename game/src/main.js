@@ -178,6 +178,19 @@ class Game {
         }
         return bd;
       },
+      nearestEnemyPos: () => {
+        const pp = this.playerPos();
+        let best = null;
+        let bd = Infinity;
+        for (const e of this.enemies.list) {
+          const d = Math.hypot(e.pos.x - pp.x, e.pos.z - pp.z);
+          if (d < bd) {
+            bd = d;
+            best = e;
+          }
+        }
+        return best ? { x: best.pos.x, z: best.pos.z, d: bd } : null;
+      },
     };
     window.__ready = false;
 
