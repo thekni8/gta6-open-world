@@ -58,8 +58,10 @@ export const MISSIONS = [
       { type: 'goto', x: -214, z: 60, radius: 12, label: 'Reach Meridian Port' },
       {
         type: 'eliminate', count: 6, label: 'Eliminate the gunmen',
+        // Open gaps between the container rows (rows sit at z=44/60/76…,
+        // columns at x=-234/-221/-208) — never inside a container.
         spawns: [
-          [-220, 44], [-206, 76], [-222, 92], [-204, 40], [-214, 108], [-226, 66],
+          [-214, 52], [-227, 68], [-214, 84], [-200, 100], [-227, 100], [-214, 116],
         ],
       },
     ],

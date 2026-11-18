@@ -15,8 +15,11 @@ export class Weapons {
   }
 
   // Spawn a hostile gunman at a position. Returns the ped record.
+  // The spawn point is nudged to clear ground — an enemy entombed inside
+  // a container or a building could never be seen or shot.
   spawnEnemy(game, x, z) {
-    const ped = game.peds._makePed(x, z);
+    const spot = this._clearSpot(game, x, z);
+    const ped = game.peds._makePed(spot.x, spot.z);
     ped.isEnemy = true;
     ped.health = 100;
     ped.state = 'guard';
@@ -43,6 +46,26 @@ export class Weapons {
     ped.healthBarBg = barBg;
     this.enemies.push(ped);
     return ped;
+  }
+
+  // Find clear ground near (x, z): outside every building/container
+  // collider, so a spawned enemy is always visible and hittable.
+  _clearSpot(game, x, z) {
+    const fits = (px, pz) => {
+      for (const c of game.city.colliders) {
+        if (px > c.minX - 1 && px < c.maxX + 1 && pz > c.minZ - 1 && pz < c.maxZ + 1) return false;
+      }
+      return true;
+    };
+    if (fits(x, z)) return { x, z };
+    for (let r = 2; r <= 14; r += 2) {
+      for (let a = 0; a < 8; a++) {
+        const px = x + Math.cos((a / 8) * Math.PI * 2) * r;
+        const pz = z + Math.sin((a / 8) * Math.PI * 2) * r;
+        if (fits(px, pz)) return { x: px, z: pz };
+      }
+    }
+    return { x, z };
   }
 
   clearEnemies(game) {
