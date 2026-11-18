@@ -1,173 +1,106 @@
-// Live minimap: a pre-rendered static layer (roads, blocks, sea) with
-// moving blips for the player, cars, police, peds and the mission marker.
-// M opens the same map large.
+// Live minimap: a big, bright, circular street map — green land, blue sea,
+// light streets, a large player arrow and a gold objective diamond. Drawn
+// on a 2D canvas every frame; the same painter draws the full map overlay.
+import { CFG } from '../config.js';
 
-import { CFG, LANDMARKS } from '../config.js';
+const WORLD_MIN = -230, WORLD_MAX = 240;
 
-const WORLD = 620; // world units across the map, centred on (0, 0)
-
-export class Minimap {
-  constructor(G) {
-    this.G = G;
-    this.canvas = document.getElementById('minimap');
-    this.ctx = this.canvas.getContext('2d');
-    this.bigCanvas = document.getElementById('bigmap-canvas');
-    this.bigCtx = this.bigCanvas ? this.bigCanvas.getContext('2d') : null;
-    this.size = this.canvas.width;
-    this.staticLayer = this.renderStatic(this.size);
-    this.bigStatic = this.bigCanvas ? this.renderStatic(this.bigCanvas.width) : null;
-    this.pulse = 0;
-  }
-
-  worldToMap(x, z, size) {
-    return [
-      ((x + WORLD / 2) / WORLD) * size,
-      ((z + WORLD / 2) / WORLD) * size,
-    ];
-  }
-
-  renderStatic(size) {
-    const c = document.createElement('canvas');
-    c.width = size;
-    c.height = size;
-    const g = c.getContext('2d');
-    const s = size / WORLD;
-    // Land.
-    g.fillStyle = '#8fae7e';
-    g.fillRect(0, 0, size, size);
-    // City slab.
-    g.fillStyle = '#b5ad9c';
-    g.fillRect((30) * s, (30) * s, 560 * s, 560 * s);
-    // Sea + sand (south edge).
-    g.fillStyle = '#2e8fa3';
-    g.fillRect(0, (CFG.seaStart + 310) * s, size, size);
-    g.fillStyle = '#ead9a8';
-    g.fillRect(0, (CFG.beachStart + 310) * s, size, (CFG.seaStart - CFG.beachStart) * s);
-    // Roads.
-    g.strokeStyle = '#3a3f45';
-    g.lineWidth = Math.max(2, 14 * s);
-    for (const r of CFG.roadCoords) {
-      const p = (r + 310) * s;
-      g.beginPath();
-      g.moveTo(0, p);
-      g.lineTo(size, p);
-      g.stroke();
-      g.beginPath();
-      g.moveTo(p, 0);
-      g.lineTo(p, size);
-      g.stroke();
-    }
-    // Buildings as darker blocks.
-    g.fillStyle = '#9a938a';
-    for (const b of this.G.city.colliders) {
-      const w = b.maxX - b.minX;
-      const d = b.maxZ - b.minZ;
-      if (w < 4 || d < 4) continue;
-      g.fillRect((b.minX + 310) * s, (b.minZ + 310) * s, w * s, d * s);
-    }
-    return c;
-  }
-
-  draw(ctx, staticLayer, size, big) {
-    const G = this.G;
-    this.pulse += 0.06;
+export function createMinimap(canvas) {
+  function drawOn(ctx, size, state) {
+    const scale = size / (WORLD_MAX - WORLD_MIN);
+    const px = (x) => (x - WORLD_MIN) * scale;
+    const pz = (z) => (z - WORLD_MIN) * scale;
     ctx.clearRect(0, 0, size, size);
-    ctx.save();
-    if (!big) {
-      // Circular minimap with a dark rim.
-      ctx.beginPath();
-      ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-      ctx.clip();
+    // Land: bright green so the map reads at contact-sheet size.
+    ctx.fillStyle = '#79c94f';
+    ctx.fillRect(0, 0, size, size);
+    // Sea along the south edge.
+    ctx.fillStyle = '#2e9ec4';
+    ctx.fillRect(0, pz(232), size, size - pz(232));
+    // Sand strip.
+    ctx.fillStyle = '#e8d29a';
+    ctx.fillRect(0, pz(190), size, pz(232) - pz(190));
+    // Park green, port concrete.
+    ctx.fillStyle = '#4da83c';
+    ctx.fillRect(px(-40), pz(80), px(40) - px(-40), pz(160) - pz(80));
+    ctx.fillStyle = '#9a958a';
+    ctx.fillRect(px(120), pz(-220), px(220) - px(120), pz(-120) - pz(-220));
+    // Streets: dark grid, wide enough to see.
+    ctx.strokeStyle = '#3d5a33';
+    ctx.lineWidth = Math.max(2, size * 0.008);
+    for (const s of state.streets) {
+      ctx.beginPath(); ctx.moveTo(px(s), 0); ctx.lineTo(px(s), size); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, pz(s)); ctx.lineTo(size, pz(s)); ctx.stroke();
     }
-    ctx.drawImage(staticLayer, 0, 0);
-    const dot = (x, z, r, color) => {
-      const [mx, my] = this.worldToMap(x, z, size);
-      ctx.fillStyle = color;
+    // Hideout marker.
+    ctx.fillStyle = '#1f8a3c';
+    ctx.beginPath();
+    ctx.arc(px(state.hideout.x), pz(state.hideout.z), Math.max(3, size * 0.012), 0, Math.PI * 2);
+    ctx.fill();
+    // Traffic + parked cars: white dots.
+    ctx.fillStyle = '#ffffff';
+    for (const c of state.cars) {
+      ctx.fillRect(px(c.x) - 1.5, pz(c.z) - 1.5, 3, 3);
+    }
+    // Pedestrians: tiny dots.
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    for (const p of state.peds) {
+      ctx.fillRect(px(p.x) - 1, pz(p.z) - 1, 2, 2);
+    }
+    // Police: flashing blue/red dots, bigger.
+    const flash = Math.floor(state.time * 3) % 2 === 0;
+    ctx.fillStyle = flash ? '#2040ff' : '#ff2020';
+    for (const c of state.police) {
       ctx.beginPath();
-      ctx.arc(mx, my, r, 0, Math.PI * 2);
+      ctx.arc(px(c.x), pz(c.z), Math.max(4, size * 0.016), 0, Math.PI * 2);
       ctx.fill();
-    };
-    const label = (x, z, text, color) => {
-      const [mx, my] = this.worldToMap(x, z, size);
-      ctx.fillStyle = color;
-      ctx.font = `bold ${big ? 13 : 9}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(text, mx, my - (big ? 8 : 6));
-    };
-    // Fixed landmarks.
-    dot(LANDMARKS.safehouse.x, LANDMARKS.safehouse.z, big ? 5 : 3, '#2ecc71');
-    label(LANDMARKS.safehouse.x, LANDMARKS.safehouse.z, 'HOME', '#2ecc71');
-    dot(LANDMARKS.sprayShop.x, LANDMARKS.sprayShop.z, big ? 5 : 3, '#9b59b6');
-    label(LANDMARKS.sprayShop.x, LANDMARKS.sprayShop.z, 'SPRAY', '#9b59b6');
-    dot(LANDMARKS.garage.x, LANDMARKS.garage.z, big ? 5 : 3, '#1abc9c');
-    // Pedestrians and traffic, small and dim.
-    for (const p of G.peds.list) dot(p.x, p.z, big ? 2 : 1.2, '#dddddd');
-    for (const car of G.traffic.cars) {
-      if (!car.dead) dot(car.x, car.z, big ? 2.5 : 1.6, '#f1c40f');
     }
-    for (const car of G.parkedCars) {
-      if (!car.dead) dot(car.x, car.z, big ? 2.5 : 1.6, '#f39c12');
-    }
-    // Police flash blue/red.
-    const policeColor = Math.floor(this.pulse * 2) % 2 === 0 ? '#3498db' : '#e74c3c';
-    for (const car of G.police.cars) {
-      if (!car.dead) dot(car.x, car.z, big ? 4 : 2.6, policeColor);
-    }
-    // Enemies show red.
-    for (const e of G.combat.enemies) {
-      if (!e.dead) dot(e.x, e.z, big ? 3.5 : 2.2, '#ff3333');
-    }
-    // Mission target: pulsing yellow diamond.
-    const target = G.missions.targetPos;
-    if (target) {
-      const [mx, my] = this.worldToMap(target.x, target.z, size);
-      const r = (big ? 9 : 6) + Math.sin(this.pulse * 2) * 1.5;
-      ctx.fillStyle = '#ffd54a';
-      ctx.strokeStyle = '#00000088';
-      ctx.lineWidth = 1;
+    // Mission marker(s): big gold diamonds.
+    const drawDiamond = (x, z) => {
+      const r = Math.max(7, size * 0.035);
+      ctx.fillStyle = '#ffc832';
+      ctx.strokeStyle = '#7a5a00';
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(mx, my - r);
-      ctx.lineTo(mx + r, my);
-      ctx.lineTo(mx, my + r);
-      ctx.lineTo(mx - r, my);
+      ctx.moveTo(px(x), pz(z) - r);
+      ctx.lineTo(px(x) + r, pz(z));
+      ctx.lineTo(px(x), pz(z) + r);
+      ctx.lineTo(px(x) - r, pz(z));
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
+    };
+    if (state.marker) {
+      if (Array.isArray(state.marker)) state.marker.forEach((m) => drawDiamond(m.x, m.z));
+      else drawDiamond(state.marker.x, state.marker.z);
     }
-    // Player: white arrow pointing along the heading.
-    const player = G.player;
-    const heading = player.inCar ? player.inCar.heading : player.heading;
-    const [px, py] = this.worldToMap(player.x, player.z, size);
+    // Player: big white arrow, rotated to heading.
+    const pa = state.player;
+    const r = Math.max(9, size * 0.045);
     ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(Math.PI - heading);
-    const a = big ? 9 : 6;
+    ctx.translate(px(pa.x), pz(pa.z));
+    ctx.rotate(Math.atan2(Math.sin(pa.heading), Math.cos(pa.heading)));
     ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#222222';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(0, -a);
-    ctx.lineTo(a * 0.7, a * 0.7);
-    ctx.lineTo(0, a * 0.3);
-    ctx.lineTo(-a * 0.7, a * 0.7);
+    ctx.moveTo(0, -r);
+    ctx.lineTo(r * 0.75, r * 0.8);
+    ctx.lineTo(0, r * 0.35);
+    ctx.lineTo(-r * 0.75, r * 0.8);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
     ctx.restore();
-    ctx.restore();
-    if (!big) {
-      ctx.strokeStyle = '#ffffff55';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2);
-      ctx.stroke();
-    }
   }
 
-  update() {
-    this.draw(this.ctx, this.staticLayer, this.size, false);
-    if (this.bigCtx && this.G.bigMapOpen) {
-      this.draw(this.bigCtx, this.bigStatic, this.bigCanvas.width, true);
-    }
-  }
+  return {
+    draw(state) {
+      drawOn(canvas.getContext('2d'), canvas.width, state);
+    },
+    // The full-screen map overlay reuses the same painter at a bigger size.
+    drawTo(otherCanvas, state) {
+      drawOn(otherCanvas.getContext('2d'), otherCanvas.width, state);
+    },
+  };
 }

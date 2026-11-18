@@ -1,49 +1,40 @@
-// Late-afternoon sun, sky and fog for Meridian Bay.
-// One warm directional light with a shadow camera that follows the player,
-// so shadows stay crisp wherever the action is.
-
+// Late-afternoon sun over Meridian Bay: warm directional light with
+// shadows that follow the player, sky color, and light distance fog.
 import { CFG } from '../config.js';
 
-const THREE = window.THREE;
+export function createDaylight(scene, renderer) {
+  scene.background = new THREE.Color(CFG.skyColor);
+  scene.fog = new THREE.Fog(CFG.fogColor, CFG.fogNear, CFG.fogFar);
 
-export class Daylight {
-  constructor(G) {
-    this.G = G;
-    const scene = G.scene;
-    scene.background = new THREE.Color(CFG.skyColor);
-    scene.fog = new THREE.Fog(CFG.skyColor, CFG.fogNear, CFG.fogFar);
+  const sun = new THREE.DirectionalLight(CFG.sunColor, CFG.sunIntensity);
+  sun.position.set(120, 180, 60);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -130;
+  sun.shadow.camera.right = 130;
+  sun.shadow.camera.top = 130;
+  sun.shadow.camera.bottom = -130;
+  sun.shadow.camera.near = 20;
+  sun.shadow.camera.far = 500;
+  sun.shadow.bias = -0.0006;
+  scene.add(sun);
+  scene.add(sun.target);
 
-    this.sun = new THREE.DirectionalLight(CFG.sunColor, CFG.sunIntensity);
-    this.sun.position.set(90, 130, 60);
-    this.sun.castShadow = !(G.quality && G.quality.light);
-    const shadowSize = (G.quality && G.quality.shadowSize) || CFG.shadowMapSize;
-    this.sun.shadow.mapSize.set(shadowSize, shadowSize);
-    const r = CFG.shadowRadius;
-    const cam = this.sun.shadow.camera;
-    cam.left = -r;
-    cam.right = r;
-    cam.top = r;
-    cam.bottom = -r;
-    cam.near = 10;
-    cam.far = 420;
-    cam.updateProjectionMatrix();
-    this.sun.shadow.bias = -0.0006;
-    scene.add(this.sun);
-    scene.add(this.sun.target);
+  const hemi = new THREE.HemisphereLight(CFG.hemiSky, CFG.hemiGround, CFG.hemiIntensity);
+  scene.add(hemi);
 
-    this.hemi = new THREE.HemisphereLight(CFG.hemiSky, CFG.hemiGround, 0.85);
-    scene.add(this.hemi);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
 
-    // A soft warm bounce from the west so shadowed faces are never black.
-    this.bounce = new THREE.DirectionalLight(0xffc9a0, 0.35);
-    this.bounce.position.set(-80, 40, -60);
-    scene.add(this.bounce);
-  }
-
-  // Keep the shadow frustum centred on the action.
-  update(focusX, focusZ) {
-    const s = this.sun;
-    s.position.set(focusX + 90, 130, focusZ + 60);
-    s.target.position.set(focusX, 0, focusZ);
-  }
+  return {
+    update(focusX, focusZ) {
+      // Keep the shadow frustum centered on the action.
+      sun.position.set(focusX + 120, 180, focusZ + 60);
+      sun.target.position.set(focusX, 0, focusZ);
+      sun.target.updateMatrixWorld();
+    },
+  };
 }

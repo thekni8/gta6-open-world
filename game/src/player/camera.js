@@ -1,94 +1,63 @@
-// Third-person follow camera: orbits with the mouse (pointer lock, or Q/E
-// as a fallback), pulls in instead of clipping through buildings, and kicks
-// the FOV out a little at driving speed.
+// Third-person follow camera: orbits with the mouse (or arrow keys),
+// sits higher and further back while driving, pulls in instead of clipping
+// through buildings, and eases back behind the car at speed.
+import { clamp, angleLerp } from '../util/random.js';
 
-import { clamp, lerp } from '../util/random.js';
+export function createCamera(camera) {
+  let yaw = Math.PI; // behind the player, looking north
+  let pitch = 0.42;
+  let dist = 9;
+  let shake = 0;
+  let shakeX = 0, shakeY = 0;
 
-const THREE = window.THREE;
-
-export class CameraRig {
-  constructor(G) {
-    this.G = G;
-    this.yaw = 0;
-    this.pitch = 0.32;
-    this.distance = 9;
-    this.currentPos = new THREE.Vector3(0, 6, 12);
-    this.lookTarget = new THREE.Vector3();
-    this.shakeOffset = new THREE.Vector3();
-  }
-
-  update(dt, target, driving, speed01) {
-    const G = this.G;
-    const input = G.input;
-    const { dx, dy } = input.consumeMouse();
-    this.yaw -= dx * 0.0026;
-    this.pitch = clamp(this.pitch + dy * 0.0022, -0.15, 1.05);
-    // Q/E orbit the camera without the mouse — handy on a trackpad.
-    if (input.isDown('KeyQ')) this.yaw += dt * 2.2;
-    if (input.isDown('KeyE') && driving) this.yaw -= dt * 2.2;
-
-    const wantDist = driving ? 12.5 : 8.5;
-    this.distance = lerp(this.distance, wantDist, Math.min(1, dt * 3));
-    const camHeight = driving ? 4.6 : 3.4;
-    const headY = driving ? 1.6 : 2.2;
-
-    const cx = target.x - Math.sin(this.yaw) * Math.cos(this.pitch) * this.distance;
-    const cz = target.z - Math.cos(this.yaw) * Math.cos(this.pitch) * this.distance;
-    const cy = headY + Math.sin(this.pitch) * this.distance + camHeight * 0.4;
-
-    // Collision: step from the head to the wanted camera spot; stop short of
-    // the first building the segment would enter.
-    let dist = this.distance;
-    const steps = 10;
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      const px = target.x + (cx - target.x) * t;
-      const pz = target.z + (cz - target.z) * t;
-      const py = headY + (cy - headY) * t;
-      if (py < 26 && this.pointInBuilding(px, pz)) {
-        dist = Math.max(2.5, this.distance * ((i - 1) / steps));
-        break;
+  return {
+    get yaw() { return yaw; },
+    setYaw(y) { yaw = y; },
+    setPitch(p) { pitch = clamp(p, 0.12, 1.25); },
+    setDist(d) { dist = d; },
+    addShake(amount) { shake = Math.min(0.9, shake + amount); },
+    update(input, target, moving, driving, speed, dt, blockers) {
+      const m = input.consumeMouse();
+      yaw -= m.dx * 0.0028;
+      pitch = clamp(pitch + m.dy * 0.0022, 0.12, 1.25);
+      const ok = input.orbitKeys();
+      if (ok !== 0) yaw += ok * 1.9 * dt;
+      // Driving: pull further back and lower; auto-center behind the car.
+      const wantDist = driving ? 12.5 : 8.5;
+      const wantPitch = driving ? 0.34 : 0.46;
+      dist += (wantDist - dist) * Math.min(1, dt * 2.2);
+      if (Math.abs(speed) > 14 && driving) {
+        yaw = angleLerp(yaw, target.heading + Math.PI, Math.min(1, dt * 1.4));
       }
-    }
-    const fx = target.x - Math.sin(this.yaw) * Math.cos(this.pitch) * dist;
-    const fz = target.z - Math.cos(this.yaw) * Math.cos(this.pitch) * dist;
-    const fy = headY + Math.sin(this.pitch) * dist + camHeight * 0.4;
+      pitch += (wantPitch - pitch) * Math.min(1, dt * 0.6);
 
-    const smooth = Math.min(1, dt * (driving ? 5 : 8));
-    this.currentPos.x = lerp(this.currentPos.x, fx, smooth);
-    this.currentPos.y = lerp(this.currentPos.y, fy, smooth);
-    this.currentPos.z = lerp(this.currentPos.z, fz, smooth);
+      const tx = target.x, tz = target.z;
+      const ty = driving ? 1.6 : 1.9;
+      const cx = tx + Math.sin(yaw) * Math.cos(pitch) * dist;
+      const cz = tz + Math.cos(yaw) * Math.cos(pitch) * dist;
+      const cy = ty + Math.sin(pitch) * dist;
 
-    // Screen shake from the effects system, decaying on its own.
-    const sh = G.fx.shakeAmount;
-    this.shakeOffset.set(
-      (Math.random() - 0.5) * sh,
-      (Math.random() - 0.5) * sh,
-      (Math.random() - 0.5) * sh,
-    );
-    const cam = G.camera;
-    cam.position.copy(this.currentPos).add(this.shakeOffset);
-    this.lookTarget.set(target.x, headY, target.z);
-    cam.lookAt(this.lookTarget);
-    const wantFov = driving ? 62 + speed01 * 12 : 60;
-    if (Math.abs(cam.fov - wantFov) > 0.1) {
-      cam.fov = lerp(cam.fov, wantFov, Math.min(1, dt * 4));
-      cam.updateProjectionMatrix();
-    }
-  }
-
-  pointInBuilding(x, z) {
-    for (const b of this.G.city.colliders) {
-      if (x > b.minX - 0.5 && x < b.maxX + 0.5 && z > b.minZ - 0.5 && z < b.maxZ + 0.5) {
-        return true;
+      // Pull in rather than clip: raycast from target to the wanted spot.
+      let finalDist = dist;
+      if (blockers && blockers.length) {
+        const dir = new THREE.Vector3(cx - tx, cy - ty, cz - tz);
+        const len = dir.length();
+        dir.normalize();
+        const ray = new THREE.Raycaster(new THREE.Vector3(tx, ty, tz), dir, 0.5, len);
+        const hits = ray.intersectObjects(blockers, false);
+        if (hits.length) finalDist = Math.max(2.5, hits[0].distance - 0.6);
       }
-    }
-    return false;
-  }
+      const fx = tx + Math.sin(yaw) * Math.cos(pitch) * finalDist;
+      const fz = tz + Math.cos(yaw) * Math.cos(pitch) * finalDist;
+      const fy = ty + Math.sin(pitch) * finalDist;
 
-  snapTo(target) {
-    const cx = target.x - Math.sin(this.yaw) * this.distance;
-    const cz = target.z - Math.cos(this.yaw) * this.distance;
-    this.currentPos.set(cx, 5, cz);
-  }
+      // Screen shake decays fast.
+      shake = Math.max(0, shake - dt * 2.4);
+      shakeX = (Math.random() - 0.5) * shake * 0.5;
+      shakeY = (Math.random() - 0.5) * shake * 0.5;
+
+      camera.position.set(fx + shakeX, Math.max(1.2, fy + shakeY), fz);
+      camera.lookAt(tx, ty + 0.4, tz);
+    },
+  };
 }

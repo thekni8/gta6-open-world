@@ -1,132 +1,108 @@
-// Meridian Bay — tuning constants and world layout.
-// One place for every number the rest of the game shares, so balancing
-// never means hunting through gameplay code.
-
+// Meridian Bay — tuning constants. One place for every number the game
+// balances on: world size, speeds, wanted thresholds, rewards, colors.
 export const CFG = {
-  // World layout: a 9x9 road grid, roads every 60 units, road half-width 7.
-  roadSpacing: 60,
-  roadHalfWidth: 7,
-  roadCoords: [-240, -180, -120, -60, 0, 60, 120, 180, 240],
-  cityBound: 270,
-  beachStart: 232,
-  seaStart: 300,
+  // World grid: streets every 40 units from -200 to 200, road half-width 7.
+  worldHalf: 220,
+  streetStep: 40,
+  streetMin: -200,
+  streetMax: 200,
+  roadHalf: 7,
+  sidewalk: 3,
+  blockGap: 26,
 
-  // Player on foot.
-  walkSpeed: 6.5,
-  sprintSpeed: 10.5,
+  // Player on foot
+  walkSpeed: 7,
+  sprintSpeed: 11.5,
   playerRadius: 0.9,
   playerHealth: 100,
-  healthRegenDelay: 5,
-  healthRegenRate: 6,
 
-  // Driving (arcade physics, units per second).
-  carAccel: 16,
-  carBrake: 30,
-  carMaxSpeed: 38,
-  carMaxReverse: 11,
+  // Driving (arcade)
+  carAccel: 26,
+  carBrake: 42,
+  carReverse: 12,
+  carMaxSpeed: 46,
+  carMaxReverse: 14,
+  carTurn: 1.9,
+  handbrakeTurn: 2.9,
   carDrag: 0.55,
-  carGrip: 7.5,
-  handbrakeDecel: 22,
-  carRadius: 2.3,
-  trafficSpeed: 13,
+  carRadius: 2.2,
+
+  // Traffic + pedestrians
   trafficCount: 16,
-  policeTopSpeed: 44,
+  trafficSpeed: 11,
+  pedCount: 34,
+  pedWalk: 2.2,
+  pedFlee: 6.5,
 
-  // Wanted level: heat 0..100 maps to stars at these thresholds.
-  starThresholds: [10, 30, 50, 70, 90],
-  heatDecayPerSecond: 3.5,
-  heatDecayDelay: 6,
-  crimeHeat: {
-    stealCar: 22,
-    hitPedestrian: 18,
-    hurtPedestrian: 30,
-    shootNearPolice: 14,
-    ramPoliceCar: 16,
-    hurtPolice: 40,
-    killEnemy: 0,
-  },
-  policeTargetByStars: [0, 2, 3, 4, 6, 8],
-  roadblockStars: 4,
-  bustedRange: 11,
-  bustedSeconds: 3,
+  // Wanted / police
+  heatPerStar: 20,
+  heatStealCar: 22,
+  heatHitPed: 14,
+  heatKillPed: 34,
+  heatHitCop: 26,
+  heatShoot: 4,
+  heatKillCop: 40,
+  heatDecayFar: 2.2,
+  heatDecayHideout: 9,
+  policeSight: 55,
+  maxPoliceCars: 4,
 
-  // Combat.
+  // Combat
   pistolDamage: 34,
   pistolRange: 90,
-  pistolAmmo: 12,
-  pistolReloadSeconds: 1.4,
-  pistolFireInterval: 0.22,
+  pistolMag: 12,
+  pistolReloadS: 1.1,
+  pistolFireS: 0.22,
   meleeDamage: 25,
   meleeRange: 2.6,
   enemyHealth: 60,
   enemyDamage: 7,
-  enemyShootInterval: 2.4,
-  enemyAggroRange: 45,
+  enemyFireS: 1.4,
 
-  // People.
-  pedestrianCount: 26,
-  pedWalkSpeed: 2.2,
-  pedFleeSpeed: 6.5,
+  // Missions
+  markerRadius: 9,
+  startCash: 200,
 
-  // Economy.
-  startingCash: 250,
-  deathFine: 120,
-  bustedFine: 200,
-  missionRewards: [500, 800, 1200, 1800, 3000],
-
-  // Rendering.
-  shadowMapSize: 2048,
-  shadowRadius: 130,
-  fogNear: 170,
-  fogFar: 520,
-  skyColor: 0x8fc7e8,
-  sunColor: 0xffd9a3,
-  sunIntensity: 2.6,
+  // Look
+  skyColor: 0x87c5e8,
+  fogColor: 0xa8d0e8,
+  fogNear: 120,
+  fogFar: 420,
+  sunColor: 0xfff1c4,
+  sunIntensity: 1.35,
   hemiSky: 0xbfe3ff,
-  hemiGround: 0x8a7a66,
+  hemiGround: 0x8a7a5a,
+  hemiIntensity: 0.75,
+  grassColor: 0x69b34c,
+  roadColor: 0x3d3d42,
+  sidewalkColor: 0xb9b3a4,
+  sandColor: 0xe8d29a,
+  seaColor: 0x2e9ec4,
 
-  saveKey: 'meridian-bay-save-v1',
+  // District palettes (pastel, sun-soaked)
+  buildingPalettes: {
+    downtown: [0xe8b04b, 0xd97b6c, 0x7fa8c9, 0x9db98a, 0xc9a06a, 0xb08ac9, 0x6fa8a0],
+    oldtown: [0xe8c37a, 0xd98a7a, 0xa8c686, 0x7fb3c9, 0xc9a0b4, 0xe8a85c],
+    beach: [0xf2e3c6, 0xf5c9a8, 0xa8d8c9, 0xf2f2e8, 0xe8b8b0],
+    port: [0x9a8a7a, 0x8a9aa8, 0xb0a890, 0x7a8a9a],
+  },
+  carColors: [0xd84040, 0x3a6fd8, 0xf2c230, 0x37b268, 0xe8e8e8, 0x2b2b30, 0xe87a30, 0x7a4fd0, 0x40c8c8, 0xc94f7c],
+  containerColors: [0xd84f2a, 0x2a7fd8, 0x37b268, 0xe8a020, 0x7a4fd0, 0x40a8a0],
+  pedShirts: [0xd84040, 0x3a6fd8, 0xf2c230, 0x37b268, 0xe87a30, 0x7a4fd0, 0x40c8c8, 0xf2f2f2, 0x2b2b30],
 };
 
-// Named places the missions, HUD and minimap all agree on.
-export const LANDMARKS = {
-  // Landmarks sit on roads or road edges, never inside a block: a player
-  // teleported to one must not land inside a building and get shoved out.
-  safehouse: { x: -180, z: -210, name: 'Kai\'s Safehouse' },
-  garage: { x: 210, z: 120, name: 'Harbor Kings Garage' },
-  sprayShop: { x: 60, z: -210, name: 'Spray & Lay Low' },
-  port: { x: 225, z: 60, name: 'Meridian Port' },
-  downtown: { x: 0, z: 0, name: 'Downtown' },
-  marina: { x: -210, z: -150, name: 'Marina Club' },
-  beach: { x: 0, z: 240, name: 'Bayfront Beach' },
-  plaza: { x: 0, z: 60, name: 'Meridian Plaza' },
-};
+export const DISTRICTS = [
+  { name: 'MERIDIAN PORT', test: (x, z) => x > 120 && z < -120 },
+  { name: 'DOWNTOWN', test: (x, z) => x >= -60 && x <= 120 && z >= -120 && z <= 60 },
+  { name: 'OLD TOWN', test: (x, z) => x < -60 && z < 60 },
+  { name: 'MARINA', test: (x, z) => x > 100 && z >= 120 },
+  { name: 'BAYFRONT BEACH', test: (x, z) => z > 170 },
+  { name: 'HARBOR PARK', test: (x, z) => x >= -40 && x <= 40 && z >= 80 && z <= 160 },
+  { name: 'SOUTHSHORE', test: (x, z) => z >= 60 },
+  { name: 'NORTHGATE', test: (x, z) => z < -120 },
+];
 
-// District names shown on the HUD as the player moves around.
 export function districtAt(x, z) {
-  if (z > CFG.beachStart) return 'Bayfront Beach';
-  if (x > 180) return 'Meridian Port';
-  if (x < -180 && z < -60) return 'Marina District';
-  if (Math.abs(x) < 120 && Math.abs(z) < 120) return 'Downtown';
-  if (z < -180) return 'Old Town North';
-  if (x < -120) return 'Westside';
-  return 'Old Town';
+  for (const d of DISTRICTS) if (d.test(x, z)) return d.name;
+  return 'MERIDIAN BAY';
 }
-
-// Pastel building palettes per district, so each area reads differently.
-export const PALETTES = {
-  downtown: [0x9fb4c7, 0xb7c4ce, 0x8fa8bd, 0xc9b8a3, 0xa8b8a0, 0xd8cdbd],
-  oldtown: [0xe8c9a0, 0xd9a08c, 0xc9d6c0, 0xe0d3b8, 0xb8c9d9, 0xd9b8c4],
-  marina: [0xf2e3c9, 0xc9e0e8, 0xe8d3c0, 0xd9e8d3, 0xf0d9b8],
-  port: [0xb8a894, 0x9a938a, 0xc0b49a, 0x8a9aa8],
-};
-
-export const CAR_COLORS = [
-  0xc0392b, 0x2980b9, 0xf1c40f, 0x27ae60, 0xe67e22, 0x8e44ad,
-  0xecf0f1, 0x2c3e50, 0x1abc9c, 0xd35400, 0x7f8c8d, 0xfd79a8,
-];
-
-export const PED_SHIRTS = [
-  0xe74c3c, 0x3498db, 0x2ecc71, 0xf39c12, 0x9b59b6,
-  0x1abc9c, 0xe67e22, 0xfd79a8, 0x95a5a6, 0x2d3436,
-];

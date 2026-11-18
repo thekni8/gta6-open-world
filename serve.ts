@@ -1,62 +1,43 @@
-// A tiny static server for playing Meridian Bay locally (Node 22, stdlib
-// only): `node serve.ts` serves game/ on http://localhost:8080.
-// Add --port <n> to pick another port. Serves nothing outside game/.
-
-import { createReadStream, statSync } from 'node:fs';
+// Local playtest server for Meridian Bay (Node 22, standard library only).
+// Serves game/ at http://localhost:8080 so the game can be played and
+// screenshotted in a desktop browser. Not part of the submitted entry's
+// runtime — the game itself is plain static files.
 import { createServer } from 'node:http';
-import { extname, join, normalize, resolve, sep } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const gameRoot = resolve(fileURLToPath(new URL('./game', import.meta.url)));
-const args = process.argv.slice(2);
-const portFlag = args.indexOf('--port');
-const wanted = portFlag === -1 ? 8080 : Number(args[portFlag + 1]);
-const port = Number.isInteger(wanted) && wanted > 0 && wanted < 65536 ? wanted : 8080;
-
-const TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
+const root = join(fileURLToPath(new URL('.', import.meta.url)), 'game');
+const types: Record<string, string> = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
 };
 
-createServer((req, res) => {
-  const url = new URL(req.url ?? '/', 'http://localhost');
-  let path = '/';
+const server = createServer(async (req, res) => {
   try {
-    path = decodeURIComponent(url.pathname);
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    let path = decodeURIComponent(url.pathname);
+    if (path === '/') path = '/index.html';
+    const file = join(root, path);
+    if (!file.startsWith(root)) {
+      res.writeHead(403);
+      res.end('forbidden');
+      return;
+    }
+    const data = await readFile(file);
+    res.writeHead(200, { 'content-type': types[extname(file)] ?? 'application/octet-stream' });
+    res.end(data);
   } catch {
-    res.writeHead(400).end('bad request');
-    return;
+    res.writeHead(404);
+    res.end('not found');
   }
-  if (path.endsWith('/')) path += 'index.html';
-  const file = resolve(join(gameRoot, normalize(path)));
-  if (file !== gameRoot && !file.startsWith(gameRoot + sep)) {
-    res.writeHead(403).end('forbidden');
-    return;
-  }
-  let size;
-  try {
-    const st = statSync(file);
-    if (!st.isFile()) throw new Error('not a file');
-    size = st.size;
-  } catch {
-    res.writeHead(404).end('not found');
-    return;
-  }
-  res.writeHead(200, {
-    'content-type': TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': size,
-    'cache-control': 'no-store',
-  });
-  createReadStream(file).pipe(res);
-}).listen(port, '127.0.0.1', () => {
-  console.log(`Meridian Bay is on http://localhost:${port}`);
+});
+
+server.listen(8080, () => {
+  console.log('Meridian Bay at http://localhost:8080');
 });

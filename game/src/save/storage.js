@@ -1,44 +1,32 @@
-// Save games in localStorage: cash, unlocked missions, completed missions
-// and where Kai was standing. Small, versioned, and tolerant of corrupt data.
-
-import { CFG, LANDMARKS } from '../config.js';
-
-export function defaultSave() {
-  return {
-    cash: CFG.startingCash,
-    unlocked: 0,
-    completed: [],
-    playerPos: { x: LANDMARKS.safehouse.x, z: LANDMARKS.safehouse.z },
-    version: 1,
-  };
-}
+// localStorage save / load. Keeps cash, story progress, and the player's
+// last position so Continue drops you back into Meridian Bay.
+const KEY = 'meridian-bay-save-v1';
 
 export function loadSave() {
   try {
-    const raw = localStorage.getItem(CFG.saveKey);
+    const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!data || typeof data.cash !== 'number') return null;
-    return { ...defaultSave(), ...data };
-  } catch (_) {
+    if (typeof data !== 'object' || data === null) return null;
+    return data;
+  } catch {
     return null;
   }
 }
 
-export function hasSave() {
-  return loadSave() !== null;
-}
-
-export function writeSave(save) {
+export function writeSave(data) {
   try {
-    localStorage.setItem(CFG.saveKey, JSON.stringify(save));
-  } catch (_) {
-    // Private mode or full storage: the game still plays, it just forgets.
+    localStorage.setItem(KEY, JSON.stringify({ ...data, savedAt: Date.now() }));
+    return true;
+  } catch {
+    return false;
   }
 }
 
 export function clearSave() {
-  try {
-    localStorage.removeItem(CFG.saveKey);
-  } catch (_) { /* ignore */ }
+  try { localStorage.removeItem(KEY); } catch { /* storage unavailable */ }
+}
+
+export function hasSave() {
+  return loadSave() !== null;
 }

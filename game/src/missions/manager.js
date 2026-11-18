@@ -1,260 +1,187 @@
-// Mission manager: runs the active mission's stage machine, owns the 3D
-// objective beacon and the minimap marker, and hands out rewards, failure
-// and completion. Free roam is simply "no mission active".
+// Mission runtime: starts missions, advances steps, spawns mission cars
+// and gunmen, runs the countdown, places the 3D beacon + minimap marker,
+// and pays out (or fails) at the end.
+import { CFG } from '../config.js';
+import { MISSIONS } from './story.js';
+import { createCar } from '../vehicles/cars.js';
 
-import { MISSIONS, HIDEOUTS } from './story.js';
-import { Car } from '../vehicles/cars.js';
-import { formatCash } from '../util/random.js';
+export function createMissionManager(G) {
+  let current = null; // { def, stepIndex, timeLeft, choice, stepCar, killsNeeded }
+  let beacon = null;
+  let ring = null;
+  let onEvent = null;
 
-const THREE = window.THREE;
-
-export class MissionManager {
-  constructor(G) {
-    this.G = G;
-    this.active = null; // { def, stageIndex, stageState }
-    this.beacon = null;
-    this.markerRing = null;
-    this.targetCar = null;
-    this.choiceMade = null;
-  }
-
-  get currentStage() {
-    if (!this.active) return null;
-    return this.active.def.stages[this.active.stageIndex];
-  }
-
-  get objectiveText() {
-    const stage = this.currentStage;
-    if (!stage) return 'Free roam — explore Meridian Bay';
-    return stage.label;
-  }
-
-  get targetPos() {
-    const stage = this.currentStage;
-    if (!stage || !stage.pos) return null;
-    return stage.pos;
-  }
-
-  unlockedCount() {
-    return this.G.save.unlocked;
-  }
-
-  startMission(index) {
-    const G = this.G;
-    if (index < 0 || index >= MISSIONS.length) return false;
-    if (index > G.save.unlocked) {
-      G.hud.toast('Finish the previous mission to unlock this one.');
-      return false;
-    }
-    this.clearMissionObjects();
-    const def = MISSIONS[index];
-    this.active = { def, stageIndex: 0, stageState: {} };
-    this.choiceMade = null;
-    G.hud.showBanner(def.title, def.briefing);
-    G.audio.missionStart();
-    this.enterStage();
-    G.saveGame();
-    return true;
-  }
-
-  enterStage() {
-    const G = this.G;
-    const stage = this.currentStage;
-    if (!stage) return;
-    this.clearBeacon();
-    const state = this.active.stageState = {};
-    if (stage.type === 'steal') {
-      // Park the target coupe where the briefing says it is.
-      this.targetCar = new Car(G, stage.pos.x, stage.pos.z, Math.PI / 4, {
-        driver: 'none',
-        color: stage.carColor,
-        kind: stage.carKind,
-        isMissionTarget: true,
-      });
-      G.parkedCars.push(this.targetCar);
-      this.showBeacon(stage.pos, 0xffd54a);
-    } else if (stage.type === 'killAll') {
-      G.combat.spawnEnemies(stage.pos, stage.enemies || 5, 'vesper');
-      this.showBeacon(stage.pos, 0xff5252);
-    } else if (stage.type === 'choice') {
-      G.state = 'paused';
-      G.input.exitPointerLock();
-      G.menus.showChoice((crew) => this.onCrewChosen(crew));
-      this.showBeacon(stage.pos, 0x9b59b6);
-    } else if (stage.type === 'escapeTo') {
-      const hideout = HIDEOUTS[this.choiceMade || 'harbor'];
-      stage.pos = { x: hideout.x, z: hideout.z };
-      stage.label = `Reach the ${this.choiceMade === 'harbor' ? 'Harbor Kings' : 'Vesper Syndicate'} hideout`;
-      G.combat.spawnEnemies(
-        { x: (G.player.x + hideout.x) / 2, z: (G.player.z + hideout.z) / 2 },
-        stage.enemies || 4,
-        this.choiceMade === 'harbor' ? 'vesper' : 'harbor',
-      );
-      this.showBeacon(stage.pos, 0x1abc9c);
-    } else if (stage.pos) {
-      this.showBeacon(stage.pos, 0xffd54a);
-    }
-    if (stage.wantedOnEnter) {
-      // The heat arrives when the player reaches the checkpoint, not before.
-      state.wantedOnEnter = stage.wantedOnEnter;
-    }
-    G.hud.setObjective(this.objectiveText);
-  }
-
-  // Jump straight to a stage (used by the ?shot=mission demo setup).
-  debugJumpToStage(index) {
-    if (!this.active) return;
-    this.active.stageIndex = index;
-    this.enterStage();
-  }
-
-  onCrewChosen(crew) {
-    this.choiceMade = crew;
-    const G = this.G;
-    G.hud.toast(crew === 'harbor'
-      ? 'You sided with the Harbor Kings. The Syndicate is coming for you.'
-      : 'You sided with the Vesper Syndicate. The Kings will not forgive this.');
-    this.advanceStage();
-  }
-
-  advanceStage() {
-    const G = this.G;
-    G.audio.stageClear();
-    this.active.stageIndex++;
-    if (this.active.stageIndex >= this.active.def.stages.length) {
-      this.completeMission();
-    } else {
-      this.enterStage();
-    }
-  }
-
-  completeMission() {
-    const G = this.G;
-    const def = this.active.def;
-    G.save.cash += def.reward;
-    G.save.unlocked = Math.max(G.save.unlocked, def.id + 1);
-    if (!G.save.completed.includes(def.id)) G.save.completed.push(def.id);
-    this.clearMissionObjects();
-    this.active = null;
-    G.hud.setObjective('Free roam — explore Meridian Bay');
-    G.audio.missionWin();
-    G.saveGame();
-    G.state = 'paused';
-    G.input.exitPointerLock();
-    G.menus.showMissionComplete(def, () => {
-      if (def.id + 1 < MISSIONS.length) this.startMission(def.id + 1);
+  function makeBeacon() {
+    const geo = new THREE.CylinderGeometry(0.5, 0.5, 60, 10, 1, true);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffc832, transparent: true, opacity: 0.45,
+      side: THREE.DoubleSide, depthWrite: false,
     });
-  }
-
-  failMission(reason) {
-    const G = this.G;
-    if (!this.active) return;
-    const def = this.active.def;
-    this.clearMissionObjects();
-    this.active = null;
-    G.hud.setObjective('Free roam — explore Meridian Bay');
-    G.audio.missionFail();
-    G.state = 'paused';
-    G.input.exitPointerLock();
-    G.menus.showMissionFailed(def, reason, () => this.startMission(def.id));
-  }
-
-  clearMissionObjects() {
-    this.clearBeacon();
-    this.G.combat.clearEnemies();
-    if (this.targetCar && !this.targetCar.dead) {
-      // The target car stays in the world as a normal parked car.
-      this.targetCar.isMissionTarget = false;
-    }
-    this.targetCar = null;
-  }
-
-  showBeacon(pos, color) {
-    const G = this.G;
-    this.clearBeacon();
-    const group = new THREE.Group();
-    const beamMat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false,
+    beacon = new THREE.Mesh(geo, mat);
+    const ringGeo = new THREE.RingGeometry(6.5, 8, 32);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xffc832, transparent: true, opacity: 0.8, side: THREE.DoubleSide,
     });
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 60, 12, 1, true), beamMat);
-    beam.position.y = 30;
-    group.add(beam);
-    const diamond = new THREE.Mesh(
-      new THREE.OctahedronGeometry(1.6),
-      new THREE.MeshBasicMaterial({ color }),
-    );
-    diamond.position.y = 8;
-    diamond.name = 'beaconDiamond';
-    group.add(diamond);
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(4.5, 5.5, 24),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, side: THREE.DoubleSide }),
-    );
+    ring = new THREE.Mesh(ringGeo, ringMat);
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.15;
-    group.add(ring);
-    group.position.set(pos.x, 0, pos.z);
-    G.scene.add(group);
-    this.beacon = group;
+    G.scene.add(beacon, ring);
   }
 
-  clearBeacon() {
-    if (this.beacon) {
-      this.G.scene.remove(this.beacon);
-      this.beacon = null;
+  function placeBeacon(x, z) {
+    if (!beacon) makeBeacon();
+    beacon.visible = true;
+    ring.visible = true;
+    beacon.position.set(x, 30, z);
+    ring.position.set(x, 0.15, z);
+  }
+
+  function hideBeacon() {
+    if (beacon) beacon.visible = false;
+    if (ring) ring.visible = false;
+  }
+
+  function step() {
+    return current ? current.def.steps[current.stepIndex] : null;
+  }
+
+  function enterStep() {
+    const s = step();
+    if (!s) return;
+    if (s.type === 'goto' || s.type === 'stealCar') placeBeacon(s.x, s.z);
+    else if (s.type === 'choose') placeBeacon(s.options[0].x, s.options[0].z);
+    else hideBeacon();
+    if (s.type === 'enterCar' || s.type === 'stealCar') {
+      const c = createCar(G.scene, {
+        type: s.car.type, color: s.car.color, role: 'mission',
+        x: s.car.x, z: s.car.z, heading: Math.PI / 2,
+      });
+      c.missionCar = true;
+      current.stepCar = c;
     }
+    if (s.type === 'eliminate') {
+      const spots = s.dynamic
+        ? (current.choice === 'kings' ? s.spawnsKings : s.spawnsVespers)
+        : s.spawns;
+      G.combat.spawnEnemies(spots.slice(0, s.count));
+      current.killsNeeded = s.count;
+      if (spots.length) placeBeacon(spots[0].x, spots[0].z);
+    }
+    onEvent?.('step', s);
   }
 
-  distanceToTarget() {
-    const pos = this.targetPos;
-    if (!pos) return null;
-    return Math.hypot(this.G.player.x - pos.x, this.G.player.z - pos.z);
+  function advance() {
+    current.stepIndex += 1;
+    if (current.stepIndex >= current.def.steps.length) {
+      complete();
+      return;
+    }
+    enterStep();
   }
 
-  update(dt) {
-    if (this.beacon) {
-      const diamond = this.beacon.getObjectByName('beaconDiamond');
-      if (diamond) {
-        diamond.rotation.y += dt * 2;
-        diamond.position.y = 8 + Math.sin(this.G.time * 2) * 0.8;
+  function complete() {
+    const def = current.def;
+    G.cash += def.reward;
+    G.completedMissions.add(def.id);
+    G.combat.clearEnemies();
+    hideBeacon();
+    onEvent?.('complete', def);
+    current = null;
+    G.saveGame();
+  }
+
+  function fail(reason) {
+    const def = current.def;
+    G.combat.clearEnemies();
+    if (current.stepCar) {
+      G.scene.remove(current.stepCar.group);
+      current.stepCar = null;
+    }
+    hideBeacon();
+    onEvent?.('fail', { def, reason });
+    current = null;
+  }
+
+  return {
+    get current() { return current; },
+    get active() { return current !== null; },
+    set onEvent(fn) { onEvent = fn; },
+    objectiveText() {
+      const s = step();
+      if (!s) return 'Free roam — explore Meridian Bay';
+      if (s.type === 'eliminate') {
+        const left = G.combat.aliveCount();
+        return `${s.text} (${current.killsNeeded - left}/${current.killsNeeded})`;
       }
-    }
-    if (!this.active) return;
-    const G = this.G;
-    const stage = this.currentStage;
-    const player = G.player;
-    if (stage.type === 'goto' || stage.type === 'deliver' || stage.type === 'escapeTo') {
-      const d = Math.hypot(player.x - stage.pos.x, player.z - stage.pos.z);
-      if (stage.type === 'deliver' && this.targetCar) {
-        // The delivery only counts if the target car arrives with the player.
-        const carD = Math.hypot(this.targetCar.x - stage.pos.x, this.targetCar.z - stage.pos.z);
-        if (this.targetCar.dead) {
-          this.failMission('The coupe was wrecked.');
-          return;
+      return s.text;
+    },
+    timeLeft() { return current ? current.timeLeft : 0; },
+    marker() {
+      const s = step();
+      if (!s) return null;
+      if (s.type === 'goto' || s.type === 'stealCar' || s.type === 'enterCar') {
+        return { x: s.car ? s.car.x : s.x, z: s.car ? s.car.z : s.z };
+      }
+      if (s.type === 'choose') {
+        return s.options.map((o) => ({ x: o.x, z: o.z, label: o.label }));
+      }
+      if (s.type === 'eliminate') {
+        const alive = G.combat.enemies.filter((e) => !e.dead);
+        return alive.length ? { x: alive[0].x, z: alive[0].z } : null;
+      }
+      if (s.type === 'loseWanted') return { x: G.city.hideout.x, z: G.city.hideout.z };
+      return null;
+    },
+    startMission(index) {
+      const def = MISSIONS[index];
+      if (!def) return false;
+      current = { def, stepIndex: 0, timeLeft: def.timeLimit, choice: null, stepCar: null, killsNeeded: 0 };
+      if (def.startWanted) G.wanted.setStars(def.startWanted);
+      enterStep();
+      onEvent?.('start', def);
+      return true;
+    },
+    missionCar() { return current?.stepCar || null; },
+    update(dt) {
+      if (!current) return;
+      current.timeLeft -= dt;
+      if (current.timeLeft <= 0) { fail('Time ran out'); return; }
+      const s = step();
+      const px = G.player.x, pz = G.player.z;
+      if (beacon?.visible) {
+        beacon.rotation.y += dt * 0.8;
+        const pulse = 1 + Math.sin(performance.now() * 0.005) * 0.08;
+        ring.scale.setScalar(pulse);
+      }
+      if (s.type === 'goto') {
+        const d = Math.hypot(px - s.x, pz - s.z);
+        if (d < CFG.markerRadius) {
+          if (s.onArrive) onEvent?.('flavor', s.onArrive);
+          if (s.clearsWanted) G.wanted.clear();
+          advance();
         }
-        if (carD < stage.radius && player.inCar === this.targetCar) this.advanceStage();
-        return;
-      }
-      if (d < stage.radius) {
-        if (stage.type === 'goto' && this.active.stageState.wantedOnEnter) {
-          G.wanted.setHeat(55); // wanted level 3 the moment the run goes hot
-          G.hud.toast('It\'s a setup — the PD is all over you!');
+      } else if (s.type === 'enterCar' || s.type === 'stealCar') {
+        if (G.player.inCar === current.stepCar) {
+          if (s.type === 'stealCar') G.wanted.addHeat(CFG.heatStealCar, 'steal');
+          advance();
         }
-        this.advanceStage();
+      } else if (s.type === 'loseWanted') {
+        if (G.wanted.stars() === 0) advance();
+      } else if (s.type === 'eliminate') {
+        if (G.combat.aliveCount() === 0) advance();
+      } else if (s.type === 'choose') {
+        for (const o of s.options) {
+          if (Math.hypot(px - o.x, pz - o.z) < CFG.markerRadius) {
+            current.choice = o.id;
+            onEvent?.('flavor', o.id === 'kings'
+              ? 'The Harbor Kings welcome you. The Vespers won\'t forget this.'
+              : 'The Vesper Syndicate owns the night — and now it owns you.');
+            advance();
+            break;
+          }
+        }
       }
-    } else if (stage.type === 'steal') {
-      if (this.targetCar && player.inCar === this.targetCar) {
-        G.wanted.addCrime('stealCar');
-        G.hud.toast('Nice — now get it to the garage.');
-        this.advanceStage();
-      } else if (this.targetCar && this.targetCar.dead) {
-        this.failMission('The coupe was wrecked before you could take it.');
-      }
-    } else if (stage.type === 'escape') {
-      if (G.wanted.stars === 0) this.advanceStage();
-    } else if (stage.type === 'killAll') {
-      if (G.combat.enemiesAlive() === 0) this.advanceStage();
-    }
-    // Choice stages advance from the menu callback, not here.
-  }
+    },
+    failCurrent(reason) { if (current) fail(reason); },
+  };
 }
