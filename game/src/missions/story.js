@@ -75,7 +75,10 @@ export const MISSIONS = [
     reward: 5000,
     timeLimit: 420,
     steps: [
-      { type: 'goto', x: 0, z: 0, radius: 10, label: 'Meet both crews downtown' },
+      // The meet is on the downtown road (z=28) — open ground. (0,0) sat
+      // inside a building cluster whose nearest approach is 15.7u, past
+      // the trigger radius, so the mission could never start.
+      { type: 'goto', x: 0, z: 28, radius: 12, label: 'Meet both crews downtown' },
       {
         type: 'choice', label: 'Choose a side',
         options: [
