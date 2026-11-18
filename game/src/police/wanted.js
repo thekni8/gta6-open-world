@@ -38,7 +38,11 @@ export class Wanted {
 
   setStars(n, game) {
     const bands = CONFIG.wanted.starBands;
-    this.heat = bands[Math.max(0, Math.min(5, n))];
+    const clamped = Math.max(0, Math.min(5, n));
+    // Mid-band heat, so a few seconds of decay can't drop a star instantly.
+    this.heat = clamped < 5
+      ? (bands[clamped] + bands[clamped + 1]) / 2
+      : bands[5] + 10;
     this._recomputeStars(game);
   }
 

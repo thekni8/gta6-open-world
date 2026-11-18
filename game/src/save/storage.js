@@ -9,7 +9,7 @@ export function defaultSave() {
     missionsDone: [],
     cash: 250,
     playerX: 0,
-    playerZ: 40,
+    playerZ: 28, // downtown road — open ground, not against a wall
     savedAt: 0,
   };
 }

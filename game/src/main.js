@@ -132,6 +132,7 @@ class Game {
     this.save = defaultSave();
     this.cash = this.save.cash;
     this._resetWorld();
+    this.player.pos.set(0, 0, 28);
     this._beginPlay();
     this.hud.showToast('Welcome to Meridian Bay', 'Press M to start your first mission — or explore the city. Steal a car with E.', 7);
   }
@@ -276,7 +277,7 @@ class Game {
     const fine = Math.min(100, this.cash);
     this.cash -= fine;
     this._resetWorld();
-    this.player.pos.set(0, 0, 40);
+    this.player.pos.set(0, 0, 28);
     this.player.health = CONFIG.player.maxHealth;
     this.player.dead = false;
     this.state = 'playing';

@@ -95,6 +95,9 @@ export class Pedestrians {
   update(dt, game) {
     for (const p of this.peds) {
       if (p.state === 'down') continue;
+      // Enemies hold their ground and shoot (weapons.update aims them);
+      // only civilians stroll and flee.
+      if (p.isEnemy) continue;
       if (p.state === 'flee') {
         p.fleeTimer -= dt;
         if (p.fleeTimer <= 0) {

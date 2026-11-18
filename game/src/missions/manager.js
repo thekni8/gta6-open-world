@@ -72,6 +72,7 @@ export class MissionManager {
       // The marked coupe: bright red, parked at the marker.
       this.stealCar = new Car(game.scene, { x: step.x, z: step.z, angle: Math.PI / 2, color: 0xd91e1e, kind: 'sedan' });
       this.stealCar.driver = null;
+      game.traffic.parked.push(this.stealCar); // so E can enter it
       game.beacon.show(step.x, step.z);
     } else if (step.type === 'eliminate') {
       const spawns = step.spawns || this.active.rivalSpawns || [];
