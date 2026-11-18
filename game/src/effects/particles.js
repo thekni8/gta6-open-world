@@ -5,6 +5,22 @@
 const THREE = window.THREE;
 const MAX_PARTICLES = 500;
 
+// A soft round sprite so particles read as sparks and puffs, not the
+// hard squares PointsMaterial draws by default.
+function makeSoftCircleTexture() {
+  const c = document.createElement('canvas');
+  c.width = 32;
+  c.height = 32;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.85)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 32, 32);
+  return new THREE.CanvasTexture(c);
+}
+
 export class Effects {
   constructor(G) {
     this.G = G;
@@ -22,8 +38,9 @@ export class Effects {
     geo.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
     const mat = new THREE.PointsMaterial({
-      size: 0.5, vertexColors: true, transparent: true, opacity: 0.95,
-      depthWrite: false, sizeAttenuation: true,
+      size: 0.42, vertexColors: true, transparent: true, opacity: 0.95,
+      depthWrite: false, sizeAttenuation: true, map: makeSoftCircleTexture(),
+      alphaTest: 0.02,
     });
     this.points = new THREE.Points(geo, mat);
     this.points.frustumCulled = false;
