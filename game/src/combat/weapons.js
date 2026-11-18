@@ -43,6 +43,8 @@ export class Weapons {
     const origin = this.camera.position.clone();
     const dir = new THREE.Vector3();
     this.camera.getWorldDirection(dir);
+    // Kai turns to face where the camera looks when he shoots.
+    ctx.setPlayerHeading?.(Math.atan2(dir.x, dir.z));
     // Step 1: where does the crosshair point?
     this.raycaster.set(origin, dir);
     this.raycaster.far = CONFIG.combat.pistolRange;
@@ -60,11 +62,42 @@ export class Weapons {
     const pp0 = ctx.playerPos();
     const camToPlayer = origin.distanceTo(pp0);
     let aimPoint = origin.clone().addScaledVector(dir, CONFIG.combat.pistolRange);
+    let aimDist = CONFIG.combat.pistolRange;
     for (const h of worldHits) {
       if (h.distance > camToPlayer + 0.5) {
         aimPoint = h.point.clone();
+        aimDist = h.distance;
         break;
       }
+    }
+    // Aim assist: the crosshair ray is a hairline, and a gunman is 0.66 m
+    // wide — a ray that passes just beside him still counts if he is the
+    // figure the player is looking at. Any enemy or ped within ~2.6° of
+    // the crosshair and closer than the aim point becomes the aim point.
+    // (Closer than the aim point means nothing solid stands between —
+    // the raycast already found the nearest wall.)
+    const assist = (list, getPos) => {
+      let best = null;
+      let bestDist = aimDist;
+      for (const t of list) {
+        const p = getPos(t);
+        const to = new THREE.Vector3(p.x, p.y + 1.4, p.z).sub(origin);
+        const d = to.length();
+        if (d >= bestDist) continue;
+        to.normalize();
+        if (dir.dot(to) > 0.999) {
+          best = new THREE.Vector3(p.x, p.y + 1.4, p.z);
+          bestDist = d;
+        }
+      }
+      return best;
+    };
+    const assisted =
+      assist(ctx.enemies.list, (e) => e.pos) ??
+      assist(ctx.peds.peds.filter((p) => p.state !== 'down'), (p) => p.pos);
+    if (assisted) {
+      aimPoint = assisted;
+      aimDist = origin.distanceTo(assisted);
     }
     // Step 2: the shot, from Kai's chest to the aim point.
     const pp = ctx.playerPos();

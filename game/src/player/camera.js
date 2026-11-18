@@ -67,8 +67,12 @@ export class FollowCamera {
     const fx = pos.x + Math.sin(this.yaw) * cosP * clearDist;
     const fz = pos.z + Math.cos(this.yaw) * cosP * clearDist;
     const fy = pos.y + height + (driving ? Math.sin(this.pitch) * clearDist : 0);
-    // Over-the-shoulder on foot: Kai sits left of the crosshair, not under it.
-    const shoulder = driving ? 0 : 1.4;
+    // Over-the-shoulder on foot: the CAMERA sits right of Kai, so he
+    // reads left of the crosshair — but the LOOK TARGET stays on his
+    // line, unshifted, so the crosshair ray converges onto the line he
+    // shoots along instead of running parallel 1.4 m beside it (which
+    // made the ray miss every gunman standing dead ahead).
+    const shoulder = driving ? 0 : 0.9;
     const rx = Math.cos(this.yaw) * shoulder;
     const rz = -Math.sin(this.yaw) * shoulder;
 
@@ -81,10 +85,11 @@ export class FollowCamera {
     if (driving) {
       this.lookAt.set(pos.x, pos.y + 1.7, pos.z);
     } else {
-      // Aim point far ahead at chest height: the crosshair ray is honest.
+      // Aim point far ahead at chest height, ON Kai's line (unshifted):
+      // the crosshair ray is honest.
       const ax = -Math.sin(this.yaw);
       const az = -Math.cos(this.yaw);
-      this.lookAt.set(pos.x + ax * 18 + rx, pos.y + 1.5, pos.z + az * 18 + rz);
+      this.lookAt.set(pos.x + ax * 18, pos.y + 1.5, pos.z + az * 18);
     }
     this.camera.lookAt(this.lookAt);
   }

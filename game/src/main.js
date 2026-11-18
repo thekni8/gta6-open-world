@@ -216,6 +216,9 @@ class Game {
       playerPos: () => this.playerPos(),
       wantedStars: () => this.wanted.stars,
       playerAlive: () => this.player.alive,
+      setPlayerHeading: (h) => {
+        this.player.heading = h;
+      },
       landmarkPos: (name) => {
         const l = this.city.landmarks[name];
         return { x: l.x, z: l.z };
