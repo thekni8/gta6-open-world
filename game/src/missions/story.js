@@ -1,86 +1,93 @@
-/* The five-mission story arc: Kai Mercer between the Harbor Kings
-   and the Vesper Syndicate. Definitions only — the manager runs them. */
-(function () {
-  const MISSIONS = [
-    {
-      name: 'Harbor Run',
-      intro: 'Rook of the Harbor Kings needs a package moved. Get in the delivery car and run it to the marina — no questions.',
-      outro: 'Package delivered. The Kings notice a driver who shows up on time.',
-      reward: 500,
-      time: 180,
-      steps: [
-        { type: 'enterCar', car: 'delivery', text: 'Get in the delivery car' },
-        { type: 'reach', x: 176, z: 172, radius: 8, text: 'Drive to the marina marker' },
-      ],
-    },
-    {
-      name: 'Hot Wheels',
-      intro: 'The Kings want a gold coupe sitting in Midtown. Take it — quietly if you can — and bring it to the garage in Old Town.',
-      outro: 'Clean lift. The garage crew strips it before the owner finishes lunch.',
-      reward: 700,
-      time: 240,
-      steps: [
-        { type: 'stealCar', car: 'target', text: 'Steal the gold coupe in Midtown' },
-        { type: 'reach', x: -150, z: 150, radius: 8, text: 'Deliver the coupe to the garage', inCar: true },
-      ],
-    },
-    {
-      name: 'Heat Wave',
-      intro: 'A Vesper tip put the whole precinct on you. Lose the cops, then lay low at the park hideout.',
-      outro: 'Heat dies down. Somebody on the inside owes you one.',
-      reward: 900,
-      time: 240,
-      startWanted: 3,
-      steps: [
-        { type: 'evade', text: 'Lose the police' },
-        { type: 'reach', x: -150, z: 90, radius: 9, text: 'Reach the park hideout' },
-      ],
-    },
-    {
-      name: 'Port Ambush',
-      intro: 'Vesper gunmen hit a Kings shipment at Meridian Port. Get down there and clear them out.',
-      outro: 'The port is quiet again. The Kings remember who held the docks.',
-      reward: 1200,
-      time: 300,
-      steps: [
-        { type: 'reach', x: 0, z: -208, radius: 12, text: 'Reach Meridian Port' },
-        { type: 'eliminate', count: 6, text: 'Eliminate the gunmen', spawn: 'port' },
-      ],
-    },
-    {
-      name: 'Kingmaker',
-      intro: 'Both crews want you for the final play. Pick a side — drive to their door — and finish it.',
-      outro: 'Meridian Bay has one king now. And a driver nobody forgets.',
-      reward: 2500,
-      time: 360,
-      steps: [
-        { type: 'choose', text: 'Choose a side — Kings or Vesper',
-          options: [
-            { x: -170, z: -120, label: 'Harbor Kings HQ', side: 'kings' },
-            { x: 120, z: -150, label: 'Vesper Syndicate club', side: 'vesper' },
-          ] },
-        { type: 'eliminate', count: 4, text: 'Eliminate the rival crew', spawn: 'choice' },
-        { type: 'reach', x: 176, z: 172, radius: 9, text: 'Escape to the marina' },
-      ],
-    },
-  ];
+// The Meridian Bay story: Kai Mercer, driver-for-hire, caught between the
+// Harbor Kings and the Vesper Syndicate. Five missions, each with steps,
+// a timer, and a cash reward.
+export const STORY_INTRO =
+  'Kai Mercer drives for anyone who pays. Tonight the Harbor Kings pay — and the Vesper Syndicate is watching.';
 
-  // Fixed landmark positions used by missions and scenarios.
-  const PLACES = {
-    spawn: { x: 0, z: 30 },
-    deliveryCar: { x: 6, z: 42 },
-    targetCar: { x: -60, z: -54 },
-    garage: { x: -150, z: 150 },
-    marina: { x: 176, z: 172 },
-    parkHideout: { x: -150, z: 90 },
-    port: { x: 0, z: -208 },
-    kingsHQ: { x: -170, z: -120 },
-    vesperClub: { x: 120, z: -150 },
-    portSpawns: [
-      { x: -24, z: -208 }, { x: -10, z: -216 }, { x: 8, z: -204 },
-      { x: 22, z: -214 }, { x: -2, z: -224 }, { x: 16, z: -226 },
+export const MISSIONS = [
+  {
+    id: 0,
+    title: 'First Delivery',
+    giver: 'HARBOR KINGS',
+    briefing: 'A crate needs to move from the old warehouse to the marina — fast, and quiet. The Syndicate has eyes on the docks.',
+    outro: 'Clean run. The Kings notice drivers who deliver on time.',
+    reward: 500,
+    timeLimit: 180,
+    steps: [
+      { type: 'goto', x: -140, z: 28, radius: 9, label: 'Drive to the old warehouse' },
+      { type: 'goto', x: 196, z: 140, radius: 9, label: 'Deliver the crate to the marina' },
     ],
-  };
+  },
+  {
+    id: 1,
+    title: 'Borrowed Wheels',
+    giver: 'HARBOR KINGS',
+    briefing: 'The Kings need a particular car — a red coupe parked near the park. Take it, and bring it to the Northside garage. Try not to get spotted.',
+    outro: 'The coupe is in the garage. The Kings owe you one.',
+    reward: 800,
+    timeLimit: 210,
+    steps: [
+      { type: 'goto', x: -84, z: 112, radius: 10, label: 'Find the red coupe near the park' },
+      { type: 'steal', x: -84, z: 112, label: 'Steal the coupe (E to get in)' },
+      { type: 'gotoCar', x: 28, z: -140, radius: 10, label: 'Deliver the coupe to the Northside garage' },
+    ],
+  },
+  {
+    id: 2,
+    title: 'Heat Run',
+    giver: 'HARBOR KINGS',
+    briefing: 'The drop went bad — the Meridian Bay PD is all over you. Lose them, then lay low at the park hideout until it cools off.',
+    outro: 'The heat is off. For now.',
+    reward: 1200,
+    timeLimit: 300,
+    startWanted: 3,
+    steps: [
+      { type: 'loseHeat', label: 'Lose the police — break line of sight' },
+      { type: 'goto', x: 96, z: 130, radius: 12, label: 'Reach the park hideout' },
+    ],
+  },
+  {
+    id: 3,
+    title: 'Port Ambush',
+    giver: 'VESPER SYNDICATE',
+    briefing: 'The Syndicate wants the Kings\' port shipment stopped. Their gunmen are waiting at the docks. Go in loud — the Kings started this.',
+    outro: 'The docks are quiet. Both crews know your name now.',
+    reward: 2000,
+    timeLimit: 360,
+    steps: [
+      { type: 'goto', x: -214, z: 60, radius: 12, label: 'Reach Meridian Port' },
+      {
+        type: 'eliminate', count: 6, label: 'Eliminate the gunmen',
+        spawns: [
+          [-220, 44], [-206, 76], [-222, 92], [-204, 40], [-214, 108], [-226, 66],
+        ],
+      },
+    ],
+  },
+  {
+    id: 4,
+    title: 'The Choice',
+    giver: 'KAI MERCER',
+    briefing: 'Both crews want you tonight — and both want the other one gone. Pick a side, finish it, and get out of Meridian Bay airspace. The beach road is clear.',
+    outro: 'Meridian Bay is yours now, Kai. Drive careful.',
+    reward: 5000,
+    timeLimit: 420,
+    steps: [
+      { type: 'goto', x: 0, z: 0, radius: 10, label: 'Meet both crews downtown' },
+      {
+        type: 'choice', label: 'Choose a side',
+        options: [
+          { name: 'Harbor Kings', x: -140, z: -140, color: 0x3d7dd9 },
+          { name: 'Vesper Syndicate', x: 140, z: -140, color: 0x8a5fc0 },
+        ],
+      },
+      {
+        type: 'eliminate', count: 4, label: 'Eliminate the rival crew',
+        spawns: null, // filled in from the chosen side at runtime
+      },
+      { type: 'goto', x: 0, z: 210, radius: 12, label: 'Escape down the beach road' },
+    ],
+  },
+];
 
-  MB.Story = { missions: MISSIONS, places: PLACES };
-})();
+export const HIDEOUT = { x: 96, z: 130, radius: 18 };

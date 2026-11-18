@@ -4,111 +4,109 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Meridian Bay — Open-World Crime Game</title>
-<link rel="icon" href="data:,">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="game-root"></div>
+<div id="game-container"></div>
 
 <!-- ============ HUD ============ -->
-<div id="hud" class="hidden">
-  <div id="hud-topleft">
-    <div id="health-wrap"><div id="health-bar"></div><span id="health-num">100</span></div>
-    <div id="cash">$200</div>
-    <div id="stars"><span class="star">★</span><span class="star">★</span><span class="star">★</span><span class="star">★</span><span class="star">★</span></div>
+<div id="hud">
+  <!-- top-left: health + cash -->
+  <div id="status-panel">
+    <div id="health-bar"><div id="health-fill"></div><span id="health-text">100</span></div>
+    <div id="cash">$250</div>
   </div>
-  <div id="hud-topcenter">
-    <div id="mission-name">MISSION 1 · Harbor Run</div>
-    <div id="objective">Get in the delivery car</div>
-    <div id="timer">3:00</div>
+  <!-- top-right: wanted stars + big bright minimap -->
+  <div id="map-panel">
+    <div id="stars"></div>
+    <canvas id="minimap" width="248" height="248"></canvas>
   </div>
-  <div id="hud-topright">
-    <canvas id="minimap" width="220" height="220"></canvas>
-    <div id="zone-label">DOWNTOWN</div>
+  <!-- zone label -->
+  <div id="zone-label"></div>
+  <!-- toast -->
+  <div id="toast"><div id="toast-title"></div><div id="toast-body"></div></div>
+  <!-- bottom-left: mission objective + countdown -->
+  <div id="objective-panel">
+    <div id="objective-title">FREE ROAM</div>
+    <div id="objective-text">Press M to start a mission</div>
+    <div id="objective-timer">3:00</div>
   </div>
-  <div id="hud-bottomright">
-    <div id="speed-wrap"><span id="speed">0</span><span id="speed-unit"> km/h</span></div>
-    <div id="ammo">AMMO 12/12</div>
+  <!-- bottom-right: speed / ammo + controls hint -->
+  <div id="drive-panel">
+    <div id="speed"><span id="speed-value">0</span><span class="unit">km/h</span></div>
+    <div id="ammo">AMMO <span id="ammo-value">12 / 48</span></div>
+    <div id="controls-hint">WASD move/drive · Mouse look · E enter car · Click shoot · R reload · M mission · Esc pause</div>
   </div>
-  <div id="controls-hint">WASD move/drive · E enter car · LMB shoot · Q punch · R reload · F lights · M map · Esc pause</div>
-  <div id="crosshair">+</div>
-  <div id="vignette"></div>
-  <div id="toast"></div>
-  <div id="wanted-flash"></div>
+  <div id="crosshair"></div>
+  <div id="damage-flash"></div>
 </div>
 
-<!-- ============ Big map overlay ============ -->
-<div id="bigmap" class="hidden">
-  <div id="bigmap-title">MERIDIAN BAY</div>
-  <canvas id="bigmap-canvas" width="640" height="640"></canvas>
-  <div id="bigmap-hint">M or Esc to close</div>
+<!-- mission complete / failed -->
+<div id="mission-overlay" class="overlay">
+  <div class="overlay-card">
+    <div id="mission-overlay-title">MISSION COMPLETE</div>
+    <div id="mission-overlay-body"></div>
+    <button id="mission-overlay-btn" class="big-btn">Continue</button>
+  </div>
+</div>
+<div id="busted-overlay" class="overlay end-overlay">
+  <div class="overlay-card"><div class="end-title blue">BUSTED</div><div class="end-sub">The Meridian Bay PD caught up with you. Click to get back out there.</div></div>
+</div>
+<div id="wasted-overlay" class="overlay end-overlay">
+  <div class="overlay-card"><div class="end-title red">WASTED</div><div class="end-sub">Kai went down. Click to get back on your feet.</div></div>
 </div>
 
-<!-- ============ Start screen ============ -->
-<div id="start-screen">
-  <div class="menu-panel">
-    <div class="game-title">MERIDIAN BAY</div>
-    <div class="game-subtitle">A sun-soaked open-world crime story</div>
-    <div class="game-tagline">Kai Mercer. Harbor Kings. Vesper Syndicate.<br>One city. Five missions. No way back.</div>
-    <button id="btn-new" class="menu-btn primary">▶ NEW GAME</button>
-    <button id="btn-continue" class="menu-btn">CONTINUE — MISSION <span id="continue-num">1</span></button>
-    <button id="btn-freeroam" class="menu-btn">FREE ROAM</button>
-    <button id="btn-controls" class="menu-btn">CONTROLS</button>
-    <div id="controls-box" class="hidden">
-      <p><b>WASD</b> move / drive &nbsp; <b>Mouse</b> orbit camera &nbsp; <b>Shift</b> sprint</p>
-      <p><b>E</b> enter / exit car &nbsp; <b>Space</b> handbrake &nbsp; <b>LMB</b> shoot &nbsp; <b>Q</b> punch &nbsp; <b>R</b> reload</p>
-      <p><b>F</b> headlights &nbsp; <b>M</b> city map &nbsp; <b>Esc</b> pause &nbsp; <b>H</b> horn</p>
-      <p>Steal cars, lose the cops, run the five missions. Cash is king in Meridian Bay.</p>
+<!-- ============ START SCREEN ============ -->
+<div id="start-screen" class="overlay visible">
+  <div class="start-inner">
+    <div class="start-kicker">AN OPEN-WORLD CRIME GAME</div>
+    <h1 class="start-title">MERIDIAN BAY</h1>
+    <p class="start-sub">Kai Mercer drives for anyone who pays. Tonight, two crews want him — and the whole city is watching.</p>
+    <div class="start-buttons">
+      <button id="btn-new" class="big-btn">New Game</button>
+      <button id="btn-continue" class="big-btn secondary">Continue</button>
+      <button id="btn-controls" class="big-btn ghost">Controls</button>
     </div>
-    <div class="menu-foot">An original game — no real gangs, no borrowed names. Progress saves automatically.</div>
+    <div id="save-info"></div>
+    <div id="mission-list"></div>
+    <div class="start-foot">A 3D open world: drive, steal cars, outrun the police, run 5 story missions. Progress saves automatically.</div>
   </div>
 </div>
 
-<!-- ============ Pause menu ============ -->
-<div id="pause-screen" class="hidden">
-  <div class="menu-panel small">
-    <div class="game-title small">PAUSED</div>
-    <button id="btn-resume" class="menu-btn primary">RESUME</button>
-    <button id="btn-restart-mission" class="menu-btn">RESTART MISSION</button>
-    <button id="btn-quit-menu" class="menu-btn">QUIT TO MENU</button>
-    <div class="menu-foot">Progress is saved automatically.</div>
+<!-- ============ PAUSE ============ -->
+<div id="pause-menu" class="overlay">
+  <div class="overlay-card">
+    <div class="pause-title">PAUSED</div>
+    <button id="btn-resume" class="big-btn">Resume</button>
+    <button id="btn-restart-mission" class="big-btn secondary">Restart mission</button>
+    <button id="btn-pause-controls" class="big-btn ghost">Controls</button>
+    <button id="btn-music" class="big-btn ghost">Music: On</button>
+    <button id="btn-quit" class="big-btn ghost">Save &amp; quit to menu</button>
   </div>
 </div>
 
-<!-- ============ Mission end screen ============ -->
-<div id="mission-screen" class="hidden">
-  <div class="menu-panel small">
-    <div id="mission-end-title" class="game-title small">MISSION COMPLETE</div>
-    <div id="mission-end-text" class="game-tagline"></div>
-    <div id="mission-end-reward" class="reward-line"></div>
-    <button id="btn-mission-next" class="menu-btn primary">CONTINUE</button>
-    <button id="btn-mission-retry" class="menu-btn hidden">RETRY MISSION</button>
+<!-- ============ HELP ============ -->
+<div id="help-panel" class="overlay">
+  <div class="overlay-card help-card">
+    <div class="pause-title">CONTROLS</div>
+    <div class="help-grid">
+      <span>W A S D</span><span>Move on foot / drive</span>
+      <span>Mouse</span><span>Orbit camera (click to lock)</span>
+      <span>Shift</span><span>Sprint</span>
+      <span>E</span><span>Enter / exit car</span>
+      <span>Space</span><span>Handbrake</span>
+      <span>Left click</span><span>Punch / shoot</span>
+      <span>R</span><span>Reload pistol</span>
+      <span>M</span><span>Start next mission</span>
+      <span>Esc</span><span>Pause</span>
+    </div>
+    <p class="help-note">Steal cars, lose the police by breaking line of sight, and lay low in the Palm Park hideout to cool off faster. Stars mean trouble — 4+ brings roadblocks.</p>
+    <button id="btn-close-help" class="big-btn">Got it</button>
+    <button id="btn-close-help-2" class="big-btn ghost">Close</button>
   </div>
 </div>
 
 <script src="vendor/three.min.js"></script>
-<script src="src/config.js"></script>
-<script src="src/util/random.js"></script>
-<script src="src/input.js"></script>
-<script src="src/save/storage.js"></script>
-<script src="src/audio/sound.js"></script>
-<script src="src/effects/particles.js"></script>
-<script src="src/world/daylight.js"></script>
-<script src="src/world/city.js"></script>
-<script src="src/player/character.js"></script>
-<script src="src/player/camera.js"></script>
-<script src="src/vehicles/cars.js"></script>
-<script src="src/vehicles/traffic.js"></script>
-<script src="src/people/pedestrians.js"></script>
-<script src="src/police/wanted.js"></script>
-<script src="src/police/chase.js"></script>
-<script src="src/combat/weapons.js"></script>
-<script src="src/missions/story.js"></script>
-<script src="src/missions/manager.js"></script>
-<script src="src/ui/hud.js"></script>
-<script src="src/ui/minimap.js"></script>
-<script src="src/ui/menus.js"></script>
-<script src="src/scenarios.js"></script>
-<script src="src/main.js"></script>
+<script type="module" src="src/main.js"></script>
 </body>
 </html>

@@ -1,10 +1,15 @@
-// Meridian Bay — Make GTA 6 (gta6-01) entry program (Node 22, stdlib only).
-// Hands the game in: copies game/ and screenshots/ from beside this file
-// to /output and writes /output/dossier.json with the vendored make.fun
-// library. Deterministic: two runs write identical bytes.
+// Meridian Bay — entry point for the make.fun gta6-01 bounty (Node 22,
+// standard library only). The game is the static game/ folder beside this
+// file: Three.js open-world crime game, no build step, no network at run
+// time. This program hands it in: it copies game/ and screenshots/ to the
+// output directory and writes /output/dossier.json with the vendored
+// make.fun library, exactly as the kit's starter does. Outside the grader's
+// container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //
-// Local check:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+//
+// The copy is a plain file copy and buildDossier is deterministic, so
+// running this twice produces byte-identical output.
 
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,7 +27,10 @@ if (existsSync(join(here, 'screenshots'))) {
 }
 
 // The scorer's own caps (reference/gate.json): text_max_bytes shapes the
-// dossier text; the rest refuse an entry the scorer would refuse.
+// dossier's source text; the other limits refuse an entry the scorer would
+// refuse — more than 4 screenshots or one over 256 KiB; more than 993
+// files in game/ or 48 MiB of game files in all, or a path under game/
+// over 1000 bytes.
 writeFileSync(
   join(out, 'dossier.json'),
   buildDossier(out, {

@@ -1,160 +1,168 @@
-/* Police chase AI: cruisers spawn at the map edge, hunt the player,
-   ram to stop the car, and set roadblocks at 3+ stars. On foot, an
-   officer gets out and chases on foot at close range. */
-(function () {
-  const CFG = MB.CFG;
-  let roadblockTimer = 0;
-  let spawnTimer = 0;
+// Police pursuit: cruisers spawn at the wanted level's strength, chase the
+// player with ramming AI, and set roadblocks across the road at 4–5 stars.
+import { CONFIG } from '../config.js';
+import { Car } from '../vehicles/cars.js';
 
-  function wantedToCount(stars) {
-    return [0, 2, 3, 4, 5, 6][stars] || 0;
+export class Police {
+  constructor(scene, city, rng) {
+    this.scene = scene;
+    this.city = city;
+    this.rng = rng;
+    this.cars = [];
+    this.roadblockCars = [];
+    this.roadblockTimer = 0;
+    this.targetCount = 0;
   }
 
-  function spawnCop(nearPlayer) {
-    const p = MB.W.player;
-    const rng = MB.Random.makeRng((Math.random() * 1e9) | 0);
-    let x, z;
-    if (nearPlayer && p) {
-      const a = rng.range(0, Math.PI * 2);
-      const d = rng.range(45, 70);
-      x = MB.Util.clamp(p.pos.x + Math.sin(a) * d, -225, 225);
-      z = MB.Util.clamp(p.pos.z + Math.cos(a) * d, -225, 225);
-      // Snap to the nearest road so the cruiser starts on tarmac.
-      const lx = MB.City.nearestRoadLine(x), lz = MB.City.nearestRoadLine(z);
-      if (Math.abs(x - lx) < Math.abs(z - lz)) x = lx; else z = lz;
-    } else {
-      const line = rng.pick(CFG.roadLines);
-      x = rng.chance(0.5) ? line : rng.range(-220, 220);
-      z = (x === line) ? rng.range(-220, 220) : line;
+  setTargetCount(n) {
+    this.targetCount = n;
+  }
+
+  nearestCar(x, z, maxDist) {
+    let best = null;
+    let bestD = maxDist;
+    for (const c of [...this.cars, ...this.roadblockCars]) {
+      const d = Math.hypot(c.pos.x - x, c.pos.z - z);
+      if (d < bestD) { bestD = d; best = c; }
     }
-    const car = MB.Cars.createCar(x, z, rng.range(0, Math.PI * 2), { police: true });
-    car.ai = { kind: 'cop', state: 'chase', stuckT: 0, lastX: x, lastZ: z };
-    car.speed = 10;
-    MB.W.cops.push(car);
+    return best;
+  }
+
+  spawnCruiser(game, nearX = null, nearZ = null) {
+    const player = game.player;
+    // Spawn on a road, 60–90 units from the player, out of immediate sight.
+    let x;
+    let z;
+    let tries = 0;
+    do {
+      const pt = this.city.nearestRoadPoint(
+        player.pos.x + (Math.random() - 0.5) * 170,
+        player.pos.z + (Math.random() - 0.5) * 170,
+      );
+      x = pt.x;
+      z = pt.z;
+      tries++;
+    } while (Math.hypot(x - player.pos.x, z - player.pos.z) < CONFIG.police.spawnDistance && tries < 12);
+    if (nearX !== null) { x = nearX; z = nearZ; }
+    const angle = Math.atan2(-(player.pos.x - x), -(player.pos.z - z));
+    const car = new Car(this.scene, { x, z, angle, color: 0x1a3a5c, kind: 'police' });
+    car.driver = 'police';
+    this.cars.push(car);
     return car;
   }
 
-  function syncPoliceCount() {
-    const want = wantedToCount(MB.S.wanted);
-    while (MB.W.cops.length < want) spawnCop(true);
-    while (MB.W.cops.length > want) {
-      const c = MB.W.cops.pop();
-      MB.W.scene.remove(c.mesh);
-    }
-  }
-
-  function clearAll() {
-    for (let i = 0; i < MB.W.cops.length; i++) MB.W.scene.remove(MB.W.cops[i].mesh);
-    MB.W.cops.length = 0;
-  }
-
   // Roadblock: two cruisers parked across the road ahead of the player.
-  function placeRoadblock() {
-    const p = MB.W.player;
-    const car = MB.W.currentCar;
-    if (!p) return;
-    const heading = MB.S.inCar && car ? car.heading : p.heading;
-    const ahead = 42;
-    const cx = p.pos.x + Math.sin(heading) * ahead;
-    const cz = p.pos.z + Math.cos(heading) * ahead;
-    const px = Math.cos(heading), pz = -Math.sin(heading); // perpendicular
-    [-4.5, 4.5].forEach(function (off, i) {
-      const bx = MB.Util.clamp(cx + px * off, -225, 225);
-      const bz = MB.Util.clamp(cz + pz * off, -225, 225);
-      const cop = MB.Cars.createCar(bx, bz, heading + Math.PI / 2, { police: true });
-      cop.ai = { kind: 'cop', state: 'block', blockT: 14 };
-      MB.W.cops.push(cop);
-    });
-    MB.HUD.toast('ROADBLOCK AHEAD!');
+  spawnRoadblock(game) {
+    const player = game.player;
+    const ahead = player.inCar && player.car
+      ? player.car.forward()
+      : { x: -Math.sin(player.angle), z: -Math.cos(player.angle) };
+    const cx = player.pos.x + ahead.x * 42;
+    const cz = player.pos.z + ahead.z * 42;
+    const road = this.city.nearestRoadPoint(cx, cz);
+    const across = road.axis === 'x' ? { x: 0, z: 1 } : { x: 1, z: 0 };
+    const angle = road.axis === 'x' ? Math.PI / 2 : 0;
+    for (const offset of [-3.4, 3.4]) {
+      const car = new Car(this.scene, {
+        x: road.x + across.x * offset,
+        z: road.z + across.z * offset,
+        angle,
+        color: 0x1a3a5c,
+        kind: 'police',
+      });
+      car.driver = 'police-block';
+      this.roadblockCars.push(car);
+    }
   }
 
-  function update(dt) {
-    const p = MB.W.player;
-    if (!p) return;
-    const px = p.pos.x, pz = p.pos.z;
-    // Roadblocks at 3+ stars, at most one every 25 seconds.
-    roadblockTimer -= dt;
-    if (MB.S.wanted >= 3 && roadblockTimer <= 0) {
-      placeRoadblock();
-      roadblockTimer = 25;
+  clearAll() {
+    for (const c of [...this.cars, ...this.roadblockCars]) c.remove();
+    this.cars = [];
+    this.roadblockCars = [];
+    this.targetCount = 0;
+  }
+
+  update(dt, game, t) {
+    const player = game.player;
+    // Match the fleet to the wanted level.
+    if (this.cars.length < this.targetCount) {
+      this.spawnCruiser(game);
+    } else if (this.cars.length > this.targetCount) {
+      const extra = this.cars.pop();
+      extra.remove();
     }
-    // Trickle-spawn replacements for wrecked cruisers.
-    spawnTimer -= dt;
-    if (spawnTimer <= 0) {
-      spawnTimer = 3;
-      const want = wantedToCount(MB.S.wanted);
-      const active = MB.W.cops.filter(function (c) { return !c.dead; }).length;
-      if (active < want) spawnCop(true);
+    // Roadblocks at high heat, re-laid every 25 seconds.
+    if (game.wanted.stars >= CONFIG.police.roadblockAtStars) {
+      this.roadblockTimer -= dt;
+      if (this.roadblockTimer <= 0 && this.roadblockCars.length === 0) {
+        this.spawnRoadblock(game);
+        this.roadblockTimer = 25;
+      }
+    } else if (this.roadblockCars.length > 0) {
+      for (const c of this.roadblockCars) c.remove();
+      this.roadblockCars = [];
     }
-    for (let i = 0; i < MB.W.cops.length; i++) {
-      const cop = MB.W.cops[i];
-      MB.Cars.flashPoliceLights(cop, MB.S.time);
-      if (cop.dead) { cop.speed = Math.max(0, cop.speed - 25 * dt); MB.Cars.syncMesh(cop, dt); continue; }
-      const ai = cop.ai;
-      if (!ai) continue;
-      if (ai.state === 'block') {
-        ai.blockT -= dt;
-        cop.speed = 0;
-        if (ai.blockT <= 0) ai.state = 'chase';
-        MB.Cars.syncMesh(cop, dt);
-        continue;
-      }
-      if (ai.state === 'cruise') {
-        // Formation driving: straight ahead at a fixed speed, no hunting.
-        // Used to stage chase shots; the cruiser joins the hunt if the
-        // player gets far away.
-        const dx = px - cop.pos.x, dz = pz - cop.pos.z;
-        if (Math.hypot(dx, dz) > 60) ai.state = 'chase';
-        cop.speed = ai.cruiseSpeed || 12;
-        const nx = cop.pos.x + Math.sin(cop.heading) * cop.speed * dt;
-        const nz = cop.pos.z + Math.cos(cop.heading) * cop.speed * dt;
-        MB.Cars.collideCar(cop, nx, nz);
-        MB.Cars.syncMesh(cop, dt);
-        continue;
-      }
-      // Chase: steer toward the player, faster than traffic, rams on contact.
-      const dx = px - cop.pos.x, dz = pz - cop.pos.z;
+
+    for (const cop of this.cars) {
+      if (cop.dead) continue;
+      // Pursuit steering: aim at a point ahead of the player.
+      const lead = player.inCar && player.car ? Math.abs(player.car.speed) * 0.35 : 0;
+      const px = player.pos.x + (player.inCar && player.car ? player.car.forward().x * lead : 0);
+      const pz = player.pos.z + (player.inCar && player.car ? player.car.forward().z * lead : 0);
+      const dx = px - cop.pos.x;
+      const dz = pz - cop.pos.z;
       const dist = Math.hypot(dx, dz);
-      const wantHeading = Math.atan2(dx, dz);
-      let dh = wantHeading - cop.heading;
-      while (dh > Math.PI) dh -= Math.PI * 2;
-      while (dh < -Math.PI) dh += Math.PI * 2;
-      cop.heading += MB.Util.clamp(dh, -2.4 * dt, 2.4 * dt);
-      const topSpeed = 30 + MB.S.wanted * 2.5;
-      const target = dist > 6 ? topSpeed : 6;
-      cop.speed = MB.Util.lerp(cop.speed, target, Math.min(1, dt * 1.8));
-      const nx = cop.pos.x + Math.sin(cop.heading) * cop.speed * dt;
-      const nz = cop.pos.z + Math.cos(cop.heading) * cop.speed * dt;
-      const hit = MB.Cars.collideCar(cop, nx, nz);
-      if (hit && cop.speed > 12) {
-        cop.damage = Math.min(100, cop.damage + 6);
-        MB.FX.sparks(cop.pos.x, 1, cop.pos.z);
-        if (cop.damage >= 100) { cop.dead = true; MB.Wanted.addCrime('killCop'); }
-      }
-      // Stuck against a building? Reverse out and re-aim.
-      if (Math.hypot(cop.pos.x - ai.lastX, cop.pos.z - ai.lastZ) < 0.5 && cop.speed > 5) {
-        ai.stuckT += dt;
-        if (ai.stuckT > 1.2) {
-          cop.heading += Math.PI * 0.6;
-          cop.pos.x -= Math.sin(cop.heading) * 4;
-          cop.pos.z -= Math.cos(cop.heading) * 4;
-          ai.stuckT = 0;
+      const targetAngle = Math.atan2(-dx, -dz);
+      let diff = targetAngle - cop.angle;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      const steer = Math.max(-1, Math.min(1, diff * 2.4));
+      const throttle = dist > 4 ? 1 : 0.4;
+      const prevX = cop.pos.x;
+      const prevZ = cop.pos.z;
+      const prevSpeed = cop.speed;
+      cop.drive(dt, throttle, steer, false);
+      if (this.city.collideCircle(cop.pos, CONFIG.car.radius)) {
+        cop.pos.x = prevX;
+        cop.pos.z = prevZ;
+        cop.group.position.copy(cop.pos);
+        if (Math.abs(prevSpeed) > 6) {
+          cop.crash(prevSpeed * 0.4);
+          game.particles.sparks(cop.pos.x, 0.8, cop.pos.z);
         }
-      } else ai.stuckT = 0;
-      ai.lastX = cop.pos.x; ai.lastZ = cop.pos.z;
-      // Ram damage to the player's car, or a shove on foot.
-      if (dist < 3.6) {
-        if (MB.S.inCar && MB.W.currentCar) {
-          MB.W.currentCar.damage = Math.min(100, MB.W.currentCar.damage + 12 * dt);
-          MB.FX.shake(0.2);
-        } else if (Math.random() < dt * 0.8) {
-          MB.Character.damage(4);
-          MB.HUD.toast('The cops are on you!');
+        cop.speed *= -0.3;
+        // Stuck against a wall: reverse out for a moment.
+        cop.angle += 0.5;
+      }
+      // Ramming the player's car damages both.
+      if (player.inCar && player.car) {
+        const d = Math.hypot(cop.pos.x - player.car.pos.x, cop.pos.z - player.car.pos.z);
+        if (d < 3.4) {
+          const impact = Math.abs(cop.speed - player.car.speed);
+          if (impact > 4) {
+            player.car.crash(impact * 0.6);
+            game.sound.crash();
+            game.particles.sparks(player.car.pos.x, 0.8, player.car.pos.z);
+            game.particles.addShake(0.5);
+            // Shove the player car sideways.
+            const push = 2.2;
+            player.car.pos.x += (player.car.pos.x - cop.pos.x) / (d || 1) * push * dt * 8;
+            player.car.pos.z += (player.car.pos.z - cop.pos.z) / (d || 1) * push * dt * 8;
+          }
         }
       }
-      MB.Cars.syncMesh(cop, dt);
+      // A cruiser hitting the on-foot player hurts.
+      if (!player.inCar && !player.dead) {
+        const d = Math.hypot(cop.pos.x - player.pos.x, cop.pos.z - player.pos.z);
+        if (d < 2.4 && Math.abs(cop.speed) > 3) {
+          player.damage(CONFIG.police.ramDamage, game);
+          game.particles.addShake(0.6);
+        }
+      }
+      if (cop.smoking && Math.random() < 0.3) game.particles.smoke(cop.pos.x, 1.2, cop.pos.z);
+      cop.updateLights(t);
     }
+    for (const block of this.roadblockCars) block.updateLights(t);
+    game.sound.setSiren(this.cars.length > 0 && game.wanted.stars > 0);
   }
-
-  MB.Chase = { syncPoliceCount: syncPoliceCount, clearAll: clearAll, spawnCop: spawnCop, update: update, placeRoadblock: placeRoadblock };
-})();
+}

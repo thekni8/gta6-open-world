@@ -1,92 +1,81 @@
-/* Menus: start screen, pause, mission-complete/fail, big-map overlay.
-   Wires the buttons to the game state machine in main.js. */
-(function () {
-  let els = {};
-
-  function init() {
-    ['start-screen', 'pause-screen', 'mission-screen', 'bigmap', 'btn-new', 'btn-continue',
-     'btn-freeroam', 'btn-controls', 'controls-box', 'continue-num', 'btn-resume',
-     'btn-restart-mission', 'btn-quit-menu', 'mission-end-title', 'mission-end-text',
-     'mission-end-reward', 'btn-mission-next', 'btn-mission-retry'].forEach(function (id) {
-      els[id] = document.getElementById(id);
-    });
-    const save = MB.Storage.load();
-    if (save && save.missionIndex > 0 && save.missionIndex < MB.Story.missions.length) {
-      els['continue-num'].textContent = save.missionIndex + 1;
-    } else {
-      els['btn-continue'].style.display = 'none';
+// Menus: start screen (New Game / Continue / Controls), pause menu, and
+// the controls help panel. All DOM overlays above the 3D view.
+export class Menus {
+  constructor(game) {
+    this.game = game;
+    this.el = {};
+    for (const id of [
+      'start-screen', 'btn-new', 'btn-continue', 'btn-controls', 'save-info',
+      'pause-menu', 'btn-resume', 'btn-restart-mission', 'btn-pause-controls',
+      'btn-music', 'btn-quit', 'help-panel', 'btn-close-help', 'btn-close-help-2',
+      'mission-list',
+    ]) {
+      this.el[id] = document.getElementById(id);
     }
-    els['btn-new'].addEventListener('click', function () {
-      MB.Sound.unlock(); MB.Sound.click();
-      MB.Storage.clear();
-      MB.Main.newGame();
+    this.el['btn-new'].addEventListener('click', () => {
+      this.game.sound.ensure();
+      this.game.sound.uiClick();
+      this.game.newGame();
     });
-    els['btn-continue'].addEventListener('click', function () {
-      MB.Sound.unlock(); MB.Sound.click();
-      MB.Main.continueGame();
+    this.el['btn-continue'].addEventListener('click', () => {
+      this.game.sound.ensure();
+      this.game.sound.uiClick();
+      this.game.continueGame();
     });
-    els['btn-freeroam'].addEventListener('click', function () {
-      MB.Sound.unlock(); MB.Sound.click();
-      MB.Main.freeRoam();
+    this.el['btn-controls'].addEventListener('click', () => this.showHelp(true));
+    this.el['btn-close-help'].addEventListener('click', () => this.showHelp(false));
+    this.el['btn-close-help-2'].addEventListener('click', () => this.showHelp(false));
+    this.el['btn-resume'].addEventListener('click', () => this.game.togglePause(false));
+    this.el['btn-restart-mission'].addEventListener('click', () => {
+      this.game.sound.uiClick();
+      this.game.restartMission();
     });
-    els['btn-controls'].addEventListener('click', function () {
-      MB.Sound.click();
-      els['controls-box'].classList.toggle('hidden');
+    this.el['btn-pause-controls'].addEventListener('click', () => this.showHelp(true));
+    this.el['btn-music'].addEventListener('click', () => {
+      const on = this.game.sound.toggleMusic();
+      this.el['btn-music'].textContent = on ? 'Music: On' : 'Music: Off';
     });
-    els['btn-resume'].addEventListener('click', function () { MB.Sound.click(); MB.Main.resume(); });
-    els['btn-restart-mission'].addEventListener('click', function () {
-      MB.Sound.click();
-      MB.Main.resume();
-      MB.Missions.restartMission();
-    });
-    els['btn-quit-menu'].addEventListener('click', function () {
-      MB.Sound.click();
-      MB.Main.quitToMenu();
-    });
-    els['btn-mission-next'].addEventListener('click', function () {
-      MB.Sound.click();
-      hideMissionEnd();
-      MB.Main.afterMissionEnd();
-    });
-    els['btn-mission-retry'].addEventListener('click', function () {
-      MB.Sound.click();
-      hideMissionEnd();
-      MB.Main.resume();
-      MB.Missions.restartMission();
+    this.el['btn-quit'].addEventListener('click', () => {
+      this.game.sound.uiClick();
+      this.game.quitToMenu();
     });
   }
 
-  function showStart() {
-    els['start-screen'].classList.remove('hidden');
-    els['pause-screen'].classList.add('hidden');
-    els['mission-screen'].classList.add('hidden');
+  showStart(hasSave, save) {
+    this.el['start-screen'].classList.add('visible');
+    this.el['pause-menu'].classList.remove('visible');
+    this.el['btn-continue'].style.display = hasSave ? 'block' : 'none';
+    if (hasSave && save) {
+      const done = (save.missionsDone || []).length;
+      this.el['save-info'].textContent =
+        `Continue — ${done}/5 missions done · $${(save.cash || 0).toLocaleString()} cash`;
+    } else {
+      this.el['save-info'].textContent = 'No save yet — start a new game.';
+    }
+    this._renderMissionList(save);
   }
-  function hideStart() { els['start-screen'].classList.add('hidden'); }
-  function showPause() { els['pause-screen'].classList.remove('hidden'); }
-  function hidePause() { els['pause-screen'].classList.add('hidden'); }
-  function toggleBigMap() {
-    const open = els['bigmap'].classList.toggle('hidden');
-    return !open;
-  }
-  function hideBigMap() { els['bigmap'].classList.add('hidden'); }
 
-  function showMissionEnd(won, title, text, reward) {
-    els['mission-end-title'].textContent = won ? 'MISSION COMPLETE' : 'MISSION FAILED';
-    els['mission-end-title'].style.color = won ? '#7dff9a' : '#ff7a6e';
-    els['mission-end-text'].textContent = title + (text ? ' ' + text : '');
-    els['mission-end-reward'].textContent = reward || '';
-    els['btn-mission-next'].textContent = won ? 'CONTINUE' : 'BACK TO THE CITY';
-    els['btn-mission-retry'].classList.toggle('hidden', won);
-    els['mission-screen'].classList.remove('hidden');
-    MB.S.mode = 'missionEnd';
+  hideStart() {
+    this.el['start-screen'].classList.remove('visible');
   }
-  function hideMissionEnd() { els['mission-screen'].classList.add('hidden'); }
 
-  MB.Menus = {
-    init: init,
-    showStart: showStart, hideStart: hideStart,
-    showPause: showPause, hidePause: hidePause,
-    toggleBigMap: toggleBigMap, hideBigMap: hideBigMap,
-    showMissionEnd: showMissionEnd, hideMissionEnd: hideMissionEnd,
-  };
-})();
+  showPause() {
+    this.el['pause-menu'].classList.add('visible');
+  }
+
+  hidePause() {
+    this.el['pause-menu'].classList.remove('visible');
+  }
+
+  showHelp(show) {
+    this.el['help-panel'].classList.toggle('visible', show);
+  }
+
+  _renderMissionList(save) {
+    const done = new Set((save && save.missionsDone) || []);
+    const titles = ['First Delivery', 'Borrowed Wheels', 'Heat Run', 'Port Ambush', 'The Choice'];
+    this.el['mission-list'].innerHTML = titles.map((t, i) =>
+      `<div class="mission-row ${done.has(i) ? 'done' : ''}"><span>${done.has(i) ? '✓' : '○'}</span> ${i + 1}. ${t}</div>`,
+    ).join('');
+  }
+}

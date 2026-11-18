@@ -1,72 +1,148 @@
-/* HUD: health, cash, wanted stars, mission banner + timer,
-   speed, ammo, toasts, and the hurt vignette. */
-(function () {
-  let els = {};
-  let toastTimer = null;
-  let hurtTimer = null;
-
-  function init() {
-    const ids = ['hud', 'health-bar', 'health-num', 'cash', 'stars', 'mission-name', 'objective',
-      'timer', 'zone-label', 'speed', 'speed-wrap', 'ammo', 'crosshair', 'vignette', 'toast',
-      'wanted-flash', 'controls-hint'];
-    ids.forEach(function (id) { els[id] = document.getElementById(id); });
-  }
-
-  function show() { els['hud'].classList.remove('hidden'); }
-  function hide() { els['hud'].classList.add('hidden'); }
-
-  function toast(text, ms) {
-    els['toast'].textContent = text;
-    els['toast'].style.opacity = '1';
-    if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { els['toast'].style.opacity = '0'; }, ms || 2600);
-  }
-
-  function flashHurt() {
-    els['vignette'].classList.add('hurt');
-    if (hurtTimer) clearTimeout(hurtTimer);
-    hurtTimer = setTimeout(function () { els['vignette'].classList.remove('hurt'); }, 350);
-  }
-
-  function showIntro(def) {
-    const idx = MB.S.missionIndex + 1;
-    toast('MISSION ' + idx + ' · ' + def.name + ' — ' + def.intro, 4200);
-  }
-
-  function update() {
-    const S = MB.S;
-    els['health-bar'].style.width = S.health + '%';
-    els['health-bar'].style.background = S.health > 50
-      ? 'linear-gradient(90deg,#37e05a,#8cff6e)'
-      : (S.health > 25 ? 'linear-gradient(90deg,#ffc93c,#ffe27a)' : 'linear-gradient(90deg,#ff3a2e,#ff7a6e)');
-    els['health-num'].textContent = Math.round(S.health);
-    els['cash'].textContent = '$' + S.cash.toLocaleString('en-US');
-    const stars = els['stars'].children;
-    for (let i = 0; i < stars.length; i++) stars[i].classList.toggle('lit', i < S.wanted);
-    els['wanted-flash'].classList.toggle('on', S.wanted >= 3);
-    const rt = MB.Missions.runtime();
-    if (rt) {
-      els['mission-name'].textContent = 'MISSION ' + (rt.index + 1) + ' · ' + rt.def.name;
-      els['objective'].textContent = MB.Missions.objectiveText();
-      els['timer'].textContent = MB.Util.fmtTime(rt.timer);
-      els['timer'].classList.toggle('low', rt.timer < 30);
-      els['timer'].style.display = '';
-      els['mission-name'].style.display = '';
-    } else if (S.freeRoam) {
-      els['mission-name'].textContent = 'FREE ROAM';
-      els['objective'].textContent = 'Free roam — explore Meridian Bay';
-      els['timer'].style.display = 'none';
-    } else {
-      els['mission-name'].textContent = 'MERIDIAN BAY';
-      els['objective'].textContent = 'Story complete — the city is yours';
-      els['timer'].style.display = 'none';
+// HUD: health, cash, wanted stars, objective + countdown timer, speed,
+// ammo, zone label, toasts, and the mission complete/failed overlays.
+// Everything stays big and high-contrast for contact-sheet legibility.
+export class Hud {
+  constructor(game) {
+    this.game = game;
+    this.el = {};
+    for (const id of [
+      'hud', 'health-fill', 'health-text', 'cash', 'stars', 'objective-title',
+      'objective-text', 'objective-timer', 'speed', 'speed-value', 'ammo',
+      'ammo-value', 'controls-hint', 'zone-label', 'toast', 'toast-title',
+      'toast-body', 'crosshair', 'damage-flash', 'mission-overlay',
+      'mission-overlay-title', 'mission-overlay-body', 'mission-overlay-btn',
+      'busted-overlay', 'wasted-overlay',
+    ]) {
+      this.el[id] = document.getElementById(id);
     }
-    els['zone-label'].textContent = S.zone;
-    els['speed-wrap'].style.display = S.inCar ? '' : 'none';
-    els['speed'].textContent = S.speedKmh;
-    els['ammo'].textContent = 'AMMO ' + S.ammo + '/' + MB.CFG.pistolMag + ' · ' + S.reserveAmmo;
-    els['crosshair'].style.display = S.inCar ? 'none' : '';
+    this.zoneTimer = 0;
+    this.toastTimer = 0;
+    this.lastZone = '';
+    this.el['mission-overlay-btn']?.addEventListener('click', () => {
+      this.game.sound.ensure();
+      this.game.sound.uiClick();
+      this.hideMissionOverlay();
+      this.game.resumeAfterMissionEnd();
+    });
   }
 
-  MB.HUD = { init: init, show: show, hide: hide, update: update, toast: toast, flashHurt: flashHurt, showIntro: showIntro };
-})();
+  showToast(title, body, seconds = 5) {
+    this.el['toast-title'].textContent = title;
+    this.el['toast-body'].textContent = body;
+    this.el.toast.classList.add('visible');
+    this.toastTimer = seconds;
+  }
+
+  showZone(name) {
+    if (name === this.lastZone) return;
+    this.lastZone = name;
+    this.el['zone-label'].textContent = name;
+    this.el['zone-label'].classList.add('visible');
+    this.zoneTimer = 2.6;
+  }
+
+  showMissionComplete(def) {
+    this.el['mission-overlay-title'].textContent = 'MISSION COMPLETE';
+    this.el['mission-overlay-title'].style.color = '#7be382';
+    this.el['mission-overlay-body'].innerHTML =
+      `<strong>${def.title}</strong><br>${def.outro}<br><br>` +
+      `<span class="reward">+$${def.reward.toLocaleString()}</span>`;
+    this.el['mission-overlay-btn'].textContent = 'Continue';
+    this.el['mission-overlay'].classList.add('visible');
+  }
+
+  showMissionFailed(def, reason) {
+    this.el['mission-overlay-title'].textContent = 'MISSION FAILED';
+    this.el['mission-overlay-title'].style.color = '#ff6b6b';
+    this.el['mission-overlay-body'].innerHTML =
+      `<strong>${def.title}</strong><br>${reason}<br><br>Press Continue to retry the mission.`;
+    this.el['mission-overlay-btn'].textContent = 'Retry mission';
+    this.el['mission-overlay'].classList.add('visible');
+  }
+
+  hideMissionOverlay() {
+    this.el['mission-overlay'].classList.remove('visible');
+  }
+
+  showBusted() {
+    this.el['busted-overlay'].classList.add('visible');
+  }
+
+  showWasted() {
+    this.el['wasted-overlay'].classList.add('visible');
+  }
+
+  hideEndOverlays() {
+    this.el['busted-overlay'].classList.remove('visible');
+    this.el['wasted-overlay'].classList.remove('visible');
+  }
+
+  flashDamage() {
+    const f = this.el['damage-flash'];
+    f.classList.add('visible');
+    setTimeout(() => f.classList.remove('visible'), 220);
+  }
+
+  formatTime(seconds) {
+    const s = Math.max(0, Math.ceil(seconds));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  update(dt) {
+    const game = this.game;
+    const player = game.player;
+    // Timers for transient labels.
+    if (this.zoneTimer > 0) {
+      this.zoneTimer -= dt;
+      if (this.zoneTimer <= 0) this.el['zone-label'].classList.remove('visible');
+    }
+    if (this.toastTimer > 0) {
+      this.toastTimer -= dt;
+      if (this.toastTimer <= 0) this.el.toast.classList.remove('visible');
+    }
+    // Health.
+    const hp = Math.max(0, Math.round(player.health));
+    this.el['health-fill'].style.width = `${hp}%`;
+    this.el['health-fill'].style.background = hp > 50 ? '#7be382' : hp > 25 ? '#ffd23d' : '#ff6b6b';
+    this.el['health-text'].textContent = `${hp}`;
+    // Cash.
+    this.el.cash.textContent = `$${game.cash.toLocaleString()}`;
+    // Wanted stars: 5 big stars, filled gold up to the current level.
+    let starsHtml = '';
+    for (let i = 0; i < 5; i++) {
+      starsHtml += `<span class="star ${i < game.wanted.stars ? 'lit' : ''}">★</span>`;
+    }
+    this.el.stars.innerHTML = starsHtml;
+    // Objective + timer (always visible during a mission).
+    const mission = game.missions.active;
+    if (mission) {
+      this.el['objective-title'].textContent = `★ ${mission.def.title.toUpperCase()} — ${mission.def.giver}`;
+      this.el['objective-text'].textContent = game.missions.objectiveText();
+      this.el['objective-timer'].textContent = this.formatTime(mission.timeLeft);
+      this.el['objective-timer'].classList.toggle('urgent', mission.timeLeft < 30);
+      this.el['objective-timer'].style.display = 'block';
+    } else {
+      const next = game.missions.nextMission();
+      this.el['objective-title'].textContent = next ? 'FREE ROAM' : 'STORY COMPLETE';
+      this.el['objective-text'].textContent = next
+        ? `Press M to start: ${next.title} ($${next.reward}) — or explore Meridian Bay`
+        : 'You finished the story. Meridian Bay is yours — free roam forever.';
+      this.el['objective-timer'].style.display = 'none';
+    }
+    // Speed + ammo.
+    if (player.inCar && player.car) {
+      this.el.speed.style.display = 'flex';
+      this.el['speed-value'].textContent = `${Math.round(player.car.speedKmh())}`;
+      this.el.ammo.style.display = 'none';
+    } else {
+      this.el.speed.style.display = 'none';
+      this.el.ammo.style.display = 'flex';
+      this.el['ammo-value'].textContent = `${player.ammo} / ${player.reserve}`;
+    }
+    // Crosshair only on foot while playing.
+    this.el.crosshair.style.display = (!player.inCar && game.state === 'playing') ? 'block' : 'none';
+    // Zone label on district change.
+    const zone = game.currentZone();
+    this.showZone(zone);
+  }
+}

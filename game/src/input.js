@@ -1,56 +1,91 @@
-/* Keyboard + mouse input. Tracks held keys, edge-triggered presses,
-   mouse orbit drag, and click-to-shoot. */
-(function () {
-  const keys = {};
-  const pressed = {};          // true only on the frame the key went down
-  let mouseDX = 0, mouseDY = 0;
-  let dragging = false, lastX = 0, lastY = 0;
-  let mouseDown = false, mouseClicked = false;
+// Keyboard + mouse input. Tracks held keys, just-pressed edges (consumed
+// once per frame), mouse deltas for the orbit camera, and pointer lock.
+export class Input {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.downKeys = new Set();
+    this.pressedKeys = new Set();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.mouseDown = false;
+    this.mousePressed = false;
+    this.pointerLocked = false;
+    this.enabled = true;
 
-  window.addEventListener('keydown', function (e) {
-    if (e.repeat) return;
-    keys[e.code] = true;
-    pressed[e.code] = true;
-    if (['Space', 'ArrowUp', 'ArrowDown'].indexOf(e.code) >= 0) e.preventDefault();
-  });
-  window.addEventListener('keyup', function (e) { keys[e.code] = false; });
-  window.addEventListener('blur', function () {
-    for (const k in keys) keys[k] = false;
-    dragging = false; mouseDown = false;
-  });
-  window.addEventListener('mousedown', function (e) {
-    if (e.target.closest('button') || e.target.closest('.menu-panel')) return;
-    mouseDown = true; mouseClicked = true;
-    dragging = true; lastX = e.clientX; lastY = e.clientY;
-  });
-  window.addEventListener('mouseup', function () { mouseDown = false; dragging = false; });
-  window.addEventListener('mousemove', function (e) {
-    if (!dragging) return;
-    mouseDX += e.clientX - lastX;
-    mouseDY += e.clientY - lastY;
-    lastX = e.clientX; lastY = e.clientY;
-  });
+    window.addEventListener('keydown', (e) => {
+      if (!this.enabled) return;
+      if (e.code === 'Space') e.preventDefault();
+      if (!this.downKeys.has(e.code)) this.pressedKeys.add(e.code);
+      this.downKeys.add(e.code);
+    });
+    window.addEventListener('keyup', (e) => {
+      this.downKeys.delete(e.code);
+    });
+    window.addEventListener('blur', () => {
+      this.downKeys.clear();
+      this.pressedKeys.clear();
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (this.pointerLocked) {
+        this.mouseDX += e.movementX || 0;
+        this.mouseDY += e.movementY || 0;
+      }
+    });
+    document.addEventListener('mousedown', (e) => {
+      if (e.button === 0) {
+        this.mouseDown = true;
+        this.mousePressed = true;
+      }
+    });
+    document.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.mouseDown = false;
+    });
+    document.addEventListener('pointerlockchange', () => {
+      this.pointerLocked = document.pointerLockElement === this.canvas;
+    });
+    // Clicking the canvas while playing locks the pointer for mouse-look.
+    canvas.addEventListener('click', () => {
+      if (this.enabled && this.pointerLockWanted) {
+        canvas.requestPointerLock();
+      }
+    });
+    this.pointerLockWanted = false;
+  }
 
-  MB.Input = {
-    isDown: function (code) { return !!keys[code]; },
-    wasPressed: function (code) { return !!pressed[code]; },
-    mouseDelta: function () { const d = { x: mouseDX, y: mouseDY }; mouseDX = 0; mouseDY = 0; return d; },
-    isMouseDown: function () { return mouseDown; },
-    wasClicked: function () { return mouseClicked; },
-    // Forward/back/left/right as -1..1, for feet and wheels alike.
-    axes: function () {
-      let f = 0, s = 0;
-      if (keys['KeyW'] || keys['ArrowUp']) f += 1;
-      if (keys['KeyS'] || keys['ArrowDown']) f -= 1;
-      if (keys['KeyA'] || keys['ArrowLeft']) s -= 1;
-      if (keys['KeyD'] || keys['ArrowRight']) s += 1;
-      return { forward: f, strafe: s };
-    },
-    endFrame: function () {
-      for (const k in pressed) pressed[k] = false;
-      mouseClicked = false;
-    },
-    // Test/scenario helper: pretend a key is held.
-    setKey: function (code, down) { keys[code] = down; if (down) pressed[code] = true; },
-  };
-})();
+  down(code) {
+    return this.downKeys.has(code);
+  }
+
+  pressed(code) {
+    return this.pressedKeys.has(code);
+  }
+
+  consumeMousePress() {
+    const p = this.mousePressed;
+    this.mousePressed = false;
+    return p;
+  }
+
+  // Call once per frame after all systems have read input.
+  endFrame() {
+    this.pressedKeys.clear();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+  }
+
+  requestLock() {
+    this.pointerLockWanted = true;
+    if (document.pointerLockElement !== this.canvas) {
+      try {
+        this.canvas.requestPointerLock();
+      } catch {
+        /* pointer lock needs a user gesture; the click handler retries */
+      }
+    }
+  }
+
+  releaseLock() {
+    this.pointerLockWanted = false;
+    if (document.exitPointerLock) document.exitPointerLock();
+  }
+}

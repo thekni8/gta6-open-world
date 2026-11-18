@@ -1,80 +1,87 @@
-/* Wanted level: heat 0–500 maps to 0–5 stars. Crimes add heat;
-   heat decays when no cop is close, faster in a lay-low zone
-   (the parks and the marina). Stars drive police numbers. */
-(function () {
-  const CFG = MB.CFG;
-  const CRIMES = {
-    steal: CFG.stealHeat,
-    hitPed: CFG.hitPedHeat,
-    hitCar: 12,
-    hitCop: CFG.hitCopHeat,
-    shoot: CFG.shootHeat,
-    killPed: CFG.killHeat,
-    killCop: 150,
-  };
+// Wanted level: crimes add heat, heat bands map to 1–5 stars, and heat
+// decays while the police can't see the player — fast inside the hideout.
+import { CONFIG } from '../config.js';
 
-  function starsForHeat(heat) {
-    if (heat <= 0) return 0;
-    return Math.min(CFG.wantedMax, Math.ceil(heat / CFG.heatPerStar));
+export class Wanted {
+  constructor() {
+    this.heat = 0;
+    this.stars = 0;
+    this.lastCrimeAt = 0;
+    this.seenTimer = 0;
+    this.bustTimer = 0;
   }
 
-  function addCrime(kind) {
-    const heat = CRIMES[kind] || 10;
-    MB.S.heat = Math.min(CFG.wantedMax * CFG.heatPerStar, MB.S.heat + heat);
-    const newStars = starsForHeat(MB.S.heat);
-    if (newStars > MB.S.wanted) {
-      MB.S.wanted = newStars;
-      MB.HUD.toast(newStars >= 3 ? 'WANTED LEVEL ' + newStars + ' — roadblocks ahead!' : 'Wanted level ' + newStars);
-      MB.Chase.syncPoliceCount();
+  commit(crime, game) {
+    const points = CONFIG.wanted[crime] || 10;
+    this.heat = Math.min(150, this.heat + points);
+    this.lastCrimeAt = game.time;
+    this._recomputeStars(game);
+  }
+
+  _recomputeStars(game) {
+    const bands = CONFIG.wanted.starBands;
+    let stars = 0;
+    for (let i = 1; i < bands.length; i++) {
+      if (this.heat >= bands[i]) stars = i;
     }
-    MB.Wanted.lastCrimeT = MB.S.time;
-  }
-
-  function setWanted(stars) {
-    MB.S.wanted = MB.Util.clamp(stars, 0, CFG.wantedMax);
-    MB.S.heat = MB.S.wanted * CFG.heatPerStar;
-    MB.Chase.syncPoliceCount();
-  }
-
-  function isHiding() {
-    const p = MB.W.player;
-    if (!p) return false;
-    // Parks are lay-low zones: green blocks where heat bleeds off fast.
-    const zone = MB.City.zoneAt(p.pos.x, p.pos.z);
-    if (zone === 'THE MARINA') return true;
-    const inPark =
-      (Math.abs(p.pos.x - -150) < 22 && Math.abs(p.pos.z - 90) < 22) ||
-      (Math.abs(p.pos.x - 90) < 22 && Math.abs(p.pos.z - -150) < 22) ||
-      (Math.abs(p.pos.x - 150) < 22 && Math.abs(p.pos.z - 150) < 22);
-    return inPark;
-  }
-
-  function copNearby(maxD) {
-    const p = MB.W.player;
-    if (!p) return false;
-    for (let i = 0; i < MB.W.cops.length; i++) {
-      if (MB.Util.dist2d(p.pos.x, p.pos.z, MB.W.cops[i].pos.x, MB.W.cops[i].pos.z) < maxD) return true;
+    if (stars !== this.stars) {
+      this.stars = stars;
+      if (game) game.onWantedChange(stars);
     }
-    return false;
   }
 
-  function update(dt) {
-    if (MB.S.wanted <= 0) return;
-    // Heat only decays when the cops have lost sight of the player.
-    if (!copNearby(55)) {
-      MB.S.heat -= (isHiding() ? CFG.heatDecayHiding : CFG.heatDecayPerSec) * dt;
-      if (MB.S.heat <= 0) {
-        MB.S.heat = 0;
-        MB.S.wanted = 0;
-        MB.HUD.toast('You lost them. Stay clean, Kai.');
-        MB.Chase.syncPoliceCount();
-        MB.Missions.onWantedLost();
-      } else {
-        const s = starsForHeat(MB.S.heat);
-        if (s < MB.S.wanted) { MB.S.wanted = s; MB.Chase.syncPoliceCount(); }
+  clear() {
+    this.heat = 0;
+    this.stars = 0;
+    this.bustTimer = 0;
+  }
+
+  setStars(n, game) {
+    const bands = CONFIG.wanted.starBands;
+    this.heat = bands[Math.max(0, Math.min(5, n))];
+    this._recomputeStars(game);
+  }
+
+  // Called every frame: decay heat, check bust, check "seen" state.
+  update(dt, game) {
+    const player = game.player;
+    // Is any police car close enough to see the player?
+    let seen = false;
+    for (const cop of game.police.cars) {
+      if (Math.hypot(cop.pos.x - player.pos.x, cop.pos.z - player.pos.z) < CONFIG.wanted.seenRadius) {
+        seen = true;
+        break;
       }
     }
-  }
+    this.seenTimer = seen ? 2.5 : Math.max(0, this.seenTimer - dt);
+    const effectivelySeen = seen || this.seenTimer > 0;
 
-  MB.Wanted = { addCrime: addCrime, setWanted: setWanted, update: update, starsForHeat: starsForHeat, lastCrimeT: -99 };
-})();
+    if (this.stars > 0 && !effectivelySeen) {
+      const inHideout = game.missions?.inHideout(player.pos.x, player.pos.z);
+      this.heat -= (inHideout ? CONFIG.wanted.hideoutDecay : CONFIG.wanted.decayPerSecond) * dt;
+      if (this.heat < 0) this.heat = 0;
+      this._recomputeStars(game);
+    }
+
+    // Busted: a police car sits on top of a slow, on-foot player.
+    if (this.stars > 0 && !player.inCar && !player.dead) {
+      let touching = false;
+      for (const cop of game.police.cars) {
+        if (Math.hypot(cop.pos.x - player.pos.x, cop.pos.z - player.pos.z) < CONFIG.wanted.bustRadius) {
+          touching = true;
+          break;
+        }
+      }
+      if (touching) {
+        this.bustTimer += dt;
+        if (this.bustTimer >= CONFIG.wanted.bustSeconds) {
+          game.busted();
+        }
+      } else {
+        this.bustTimer = 0;
+      }
+    } else {
+      this.bustTimer = 0;
+    }
+  }
+}

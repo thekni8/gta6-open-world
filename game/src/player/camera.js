@@ -1,70 +1,91 @@
-/* Third-person follow camera: mouse-drag orbit, smooth follow,
-   and a pull-in rule so it never clips through buildings. */
-(function () {
-  const CFG = MB.CFG;
-  let yaw = Math.PI, pitch = 0.32;
-  let curDist = 9, curHeight = 4.5;
-  let desiredYaw = null; // scenario override
-
-  function yawValue() { return yaw; }
-
-  function setYaw(y) { yaw = y; desiredYaw = null; }
-  function setPitch(p) { pitch = MB.Util.clamp(p, 0.05, 1.1); }
-
-  function update(dt) {
-    const cam = MB.W.camera;
-    if (!cam) return;
-    const d = MB.Input.mouseDelta();
-    yaw -= d.x * 0.005;
-    pitch = MB.Util.clamp(pitch + d.y * 0.003, 0.08, 1.05);
-    const p = MB.W.player;
-    const car = MB.W.currentCar;
-    let tx, tz, ty, targetDist, targetHeight;
-    if (MB.S.inCar && car) {
-      tx = car.pos.x; tz = car.pos.z; ty = 1.6;
-      targetDist = CFG.camCarDist; targetHeight = CFG.camCarHeight;
-      // Driving camera gently swings behind the car's heading.
-      const carYaw = Math.atan2(Math.sin(car.heading), Math.cos(car.heading));
-      let dy = carYaw - yaw;
-      while (dy > Math.PI) dy -= Math.PI * 2;
-      while (dy < -Math.PI) dy += Math.PI * 2;
-      if (Math.abs(d.x) < 1) yaw += dy * Math.min(1, dt * 1.4);
-    } else if (p) {
-      tx = p.pos.x; tz = p.pos.z; ty = 1.7;
-      targetDist = CFG.camFootDist; targetHeight = CFG.camFootHeight;
-    } else return;
-    curDist = MB.Util.lerp(curDist, targetDist, Math.min(1, dt * 3));
-    curHeight = MB.Util.lerp(curHeight, targetHeight, Math.min(1, dt * 3));
-
-    // Pull-in: step the camera toward the target until clear of buildings,
-    // but never closer than 3.2 units — inside the player's head helps no one.
-    let dist = curDist;
-    for (let tries = 0; tries < 6 && dist > 3.2; tries++) {
-      const cx = tx - Math.sin(yaw) * Math.cos(pitch) * dist;
-      const cz = tz - Math.cos(yaw) * Math.cos(pitch) * dist;
-      if (!insideBuilding(cx, cz)) break;
-      dist = Math.max(3.2, dist * 0.72);
-    }
-    const shake = MB.FX.shakeOffset();
-    const cx = tx - Math.sin(yaw) * Math.cos(pitch) * dist + shake.x;
-    const cz = tz - Math.cos(yaw) * Math.cos(pitch) * dist;
-    const cy = ty + Math.sin(pitch) * dist + curHeight * 0.15 + shake.y;
-    cam.position.set(cx, Math.max(1.2, cy), cz);
-    // Look ahead of the player, not at the player's head: the crosshair
-    // then points at the world ahead (so the pistol can actually hit
-    // what it covers), and more of the street stays in frame.
-    const ahead = MB.S.inCar ? 9 : 5.5;
-    cam.lookAt(tx + Math.sin(yaw) * ahead, ty - 0.2, tz + Math.cos(yaw) * ahead);
+// Third-person follow camera: mouse orbit, smooth lag, look-ahead while
+// driving, and a pull-in rule so it never clips through buildings.
+export class CameraRig {
+  constructor(camera, city) {
+    this.camera = camera;
+    this.city = city;
+    this.yaw = Math.PI;
+    this.pitch = 0.42;
+    this.distance = 9.5;
+    this.targetDistance = 9.5;
+    this.lookTarget = new THREE.Vector3();
+    this.smoothedPos = new THREE.Vector3(0, 6, 12);
+    this.firstFrame = true;
   }
 
-  function insideBuilding(x, z) {
-    const cols = MB.W.colliders;
-    for (let i = 0; i < cols.length; i++) {
-      const b = cols[i];
-      if (x > b.minX - 0.5 && x < b.maxX + 0.5 && z > b.minZ - 0.5 && z < b.maxZ + 0.5) return true;
-    }
-    return false;
+  // Mouse deltas steer the orbit; pitch is clamped so the camera never
+  // goes under the ground or straight overhead.
+  updateMouse(dx, dy) {
+    this.yaw -= dx * 0.0026;
+    this.pitch = Math.max(0.12, Math.min(1.15, this.pitch + dy * 0.0022));
   }
 
-  MB.CameraRig = { update: update, yaw: yawValue, setYaw: setYaw, setPitch: setPitch };
-})();
+  setView(yaw, pitch, distance) {
+    this.yaw = yaw;
+    this.pitch = pitch;
+    this.distance = distance;
+    this.targetDistance = distance;
+  }
+
+  update(dt, game, shakeOffset) {
+    const player = game.player;
+    const inCar = player.inCar && player.car;
+    // Driving pulls the camera back and lower; on foot it sits closer.
+    this.targetDistance = inCar ? 12.5 : 9.0;
+    this.distance += (this.targetDistance - this.distance) * Math.min(1, dt * 3);
+
+    // Look target: the player, plus speed look-ahead while driving.
+    const focus = player.pos;
+    this.lookTarget.set(focus.x, focus.y + 1.7, focus.z);
+    if (inCar) {
+      const f = player.car.forward();
+      this.lookTarget.x += f.x * Math.abs(player.car.speed) * 0.22;
+      this.lookTarget.z += f.z * Math.abs(player.car.speed) * 0.22;
+      this.lookTarget.y = 1.9;
+    }
+
+    // Orbit position from yaw/pitch/distance.
+    const cosP = Math.cos(this.pitch);
+    const sinP = Math.sin(this.pitch);
+    let camX = this.lookTarget.x + Math.sin(this.yaw) * cosP * this.distance;
+    let camZ = this.lookTarget.z + Math.cos(this.yaw) * cosP * this.distance;
+    let camY = this.lookTarget.y + sinP * this.distance;
+
+    // Pull-in: step the camera toward the target until it clears buildings.
+    const probe = new THREE.Vector3();
+    let dist = this.distance;
+    for (let d = this.distance; d > 2.5; d -= 1.2) {
+      probe.set(
+        this.lookTarget.x + Math.sin(this.yaw) * cosP * d,
+        0,
+        this.lookTarget.z + Math.cos(this.yaw) * cosP * d,
+      );
+      let blocked = false;
+      for (const c of this.city.colliders) {
+        if (probe.x > c.minX - 0.5 && probe.x < c.maxX + 0.5 && probe.z > c.minZ - 0.5 && probe.z < c.maxZ + 0.5) {
+          blocked = true;
+          break;
+        }
+      }
+      if (!blocked) { dist = d; break; }
+      dist = d;
+    }
+    camX = this.lookTarget.x + Math.sin(this.yaw) * cosP * dist;
+    camZ = this.lookTarget.z + Math.cos(this.yaw) * cosP * dist;
+    camY = this.lookTarget.y + sinP * dist;
+    camY = Math.max(1.6, camY);
+
+    // Smooth follow + screen shake.
+    const k = this.firstFrame ? 1 : Math.min(1, dt * 7);
+    this.smoothedPos.x += (camX - this.smoothedPos.x) * k;
+    this.smoothedPos.y += (camY - this.smoothedPos.y) * k;
+    this.smoothedPos.z += (camZ - this.smoothedPos.z) * k;
+    this.firstFrame = false;
+    this.camera.position.set(
+      this.smoothedPos.x + (shakeOffset?.x || 0),
+      this.smoothedPos.y + (shakeOffset?.y || 0),
+      this.smoothedPos.z,
+    );
+    this.camera.lookAt(this.lookTarget);
+  }
+}

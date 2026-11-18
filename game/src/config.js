@@ -1,128 +1,94 @@
-/* Meridian Bay — tuning constants, palette, and the shared game state object.
-   Every other module reads/writes MB.S (state) and MB.W (live world refs). */
-window.MB = window.MB || {};
-(function () {
-  const CFG = {
-    // City layout
-    worldHalf: 240,            // playable square is [-240, 240] on x and z
-    roadLines: [-180, -120, -60, 0, 60, 120, 180],
-    roadWidth: 13,
-    beachX: 196,               // sand starts here; sea beyond x = 246
-    seaX: 246,
-    portZ: -196,               // port strip is z < -196
-    // Player on foot
+// Meridian Bay — tuning constants. One place for every number the rest of
+// the game balances against: world size, speeds, wanted heat, rewards.
+export const CONFIG = {
+  world: {
+    half: 240,            // city ground spans -240..240 on x and z
+    roadSpacing: 56,
+    roadWidth: 12,
+    roadLines: [-196, -140, -84, -28, 28, 84, 140, 196],
+    blockHalf: 22,        // buildings live inside blocks between roads
+    seaStart: 240,        // z beyond this is open water
+    beachStart: 196,      // z beyond this is sand
+    portEdge: -196,       // x below this is the industrial port strip
+    marinaEdge: 196,      // x above this is the marina strip
+  },
+  palette: {
+    // pastel sun-soaked building colours, cycled with a seeded shuffle
+    buildings: [0xf2e3c6, 0xf6c9a0, 0xf2a65a, 0xe98d7a, 0xd98cb3, 0x9fc6e8, 0x8fd0c2, 0xb5d99c, 0xf7e08b, 0xcbb7e8, 0xf5f0e6, 0xe8b4b8],
+    downtown: [0x9fc6e8, 0xb8cfe0, 0x8fb8d8, 0xd8c9a8, 0xc9d6e3],
+    road: 0x3d4148,
+    sidewalk: 0xcfc8b8,
+    grass: 0x6fbf5a,
+    sand: 0xf0dca8,
+    sea: 0x2fa8c9,
+    seaDeep: 0x1b7fa8,
+  },
+  player: {
     walkSpeed: 6.5,
-    sprintSpeed: 11,
-    playerRadius: 0.9,
-    playerMaxHealth: 100,
-    // Driving (arcade)
-    carAccel: 26,
-    carBrake: 42,
-    carMaxSpeed: 46,           // ~165 km/h
-    carReverseMax: 12,
-    carTurnRate: 1.9,
-    carGrip: 0.92,
-    handbrakeGrip: 0.55,
-    // Traffic + peds
-    trafficCount: 22,
-    pedCount: 34,
-    trafficSpeed: 11,
-    pedSpeed: 1.8,
-    // Wanted
-    wantedMax: 5,
-    heatPerStar: 100,
-    heatDecayPerSec: 2.2,      // while no cop can see the player
-    heatDecayHiding: 9,        // inside a lay-low zone
-    stealHeat: 60,
-    hitPedHeat: 45,
-    hitCopHeat: 120,
-    shootHeat: 30,
-    killHeat: 70,
-    // Combat
+    sprintSpeed: 10.5,
+    radius: 0.7,
+    maxHealth: 100,
+    punchDamage: 15,
+    punchRange: 2.2,
     pistolDamage: 34,
-    pistolMag: 12,
-    pistolRange: 70,
-    pistolFireDelay: 0.22,
-    meleeDamage: 25,
-    meleeRange: 3.0,
-    enemyHealth: 100,
-    enemyDamage: 7,
-    enemyShootRange: 42,
-    // Economy
-    startCash: 200,
-    missionRewards: [500, 700, 900, 1200, 2500],
-    // Camera
-    camFootDist: 8.5,
-    camFootHeight: 4.2,
-    camCarDist: 10,
-    camCarHeight: 4.2,
-    // Save
-    saveKey: 'meridian-bay-save-v6',
-  };
+    pistolAmmo: 12,
+    pistolReserve: 48,
+    pistolRange: 90,
+  },
+  car: {
+    playerMaxSpeed: 40,
+    playerAccel: 22,
+    playerBrake: 34,
+    playerReverseMax: 12,
+    trafficSpeed: 11,
+    policeMaxSpeed: 46,
+    radius: 1.9,
+    maxHealth: 100,
+  },
+  wanted: {
+    // heat points per crime; stars are heat bands
+    stealCar: 25,
+    hitPedestrian: 30,
+    hitPolice: 45,
+    shootWitnessed: 20,
+    killPedestrian: 40,
+    starBands: [0, 20, 45, 70, 95, 120], // heat needed for stars 0..5
+    decayPerSecond: 1.6,   // while unseen by police
+    hideoutDecay: 14,      // per second inside the park hideout
+    seenRadius: 55,        // police "see" the player inside this range
+    bustRadius: 3.2,       // police car touching a slow on-foot player
+    bustSeconds: 1.6,
+  },
+  police: {
+    carsPerStar: [0, 1, 2, 3, 4, 5],
+    roadblockAtStars: 4,
+    spawnDistance: 70,
+    ramDamage: 8,
+  },
+  missions: {
+    rewards: [500, 800, 1200, 2000, 5000],
+    failPenalty: 0,
+  },
+  hud: {
+    minimapSize: 248,      // big and bright: legible at contact-sheet size
+  },
+  saveKey: 'meridian-bay-save-v1',
+};
 
-  // Sun-soaked pastel palette for buildings, cars, and props.
-  const PALETTE = {
-    buildings: [0xf2c14e, 0xe88ca0, 0x7fb069, 0x6ba3b7, 0xd97b4f, 0xb5a6d6, 0x8fc1a9, 0xe5e0d0, 0xc96f6f, 0x5f8fce, 0x9db38a, 0xe0a458],
-    downtown: [0x5f8fce, 0x6ba3b7, 0x8a9bb5, 0x7fb069, 0xb5a6d6, 0xd97b4f],
-    oldtown: [0xe0a458, 0xc96f6f, 0xe5e0d0, 0xd97b4f, 0x9db38a],
-    cars: [0xd33a2c, 0x2c6fd3, 0x2fae5f, 0xf2c14e, 0xe8e8e8, 0x222831, 0x8e44ad, 0x17a2b8, 0xff7a1a, 0x7fb069],
-    shirts: [0xf2c14e, 0x2c6fd3, 0xd33a2c, 0x2fae5f, 0xe88ca0, 0xffffff, 0x222831, 0xff7a1a],
-    grass: 0x69c24a,
-    grassDark: 0x4da336,
-    sand: 0xf2ddae,
-    sea: 0x1fa8c9,
-    road: 0x2b2f36,
-    sidewalk: 0xb9b3a4,
-    plaza: 0xcfc8b4,
-  };
+export const DISTRICTS = [
+  { name: 'DOWNTOWN', x0: -84, x1: 84, z0: -84, z1: 84 },
+  { name: 'OLD TOWN', x0: -240, x1: -84, z0: -240, z1: -28 },
+  { name: 'BAYFRONT BEACH', x0: -196, x1: 196, z0: 168, z1: 240 },
+  { name: 'MERIDIAN PORT', x0: -240, x1: -168, z0: -28, z1: 196 },
+  { name: 'MARINA', x0: 168, x1: 240, z0: -84, z1: 196 },
+  { name: 'PALM PARK', x0: 28, x1: 140, z0: 84, z1: 168 },
+  { name: 'NORTHSIDE', x0: -84, x1: 240, z0: -240, z1: -84 },
+  { name: 'HARBOUR VIEW', x0: -168, x1: 28, z0: 84, z1: 168 },
+];
 
-  // Mutable run state. Reset by MB.resetState() on New Game.
-  function freshState() {
-    return {
-      mode: 'menu',            // menu | playing | paused | missionEnd
-      missionIndex: 0,         // 0-based; 5 = story done
-      cash: CFG.startCash,
-      health: CFG.playerMaxHealth,
-      wanted: 0,
-      heat: 0,
-      ammo: CFG.pistolMag,
-      reserveAmmo: 60,
-      freeRoam: false,
-      time: 0,
-      speedKmh: 0,
-      inCar: false,
-      carId: null,
-      zone: 'DOWNTOWN',
-      dead: false,
-      mission: null,           // active mission runtime (see missions/manager.js)
-      kills: 0,
-      carsStolen: 0,
-      shotsFired: 0,
-      muted: false,
-    };
+export function districtAt(x, z) {
+  for (const d of DISTRICTS) {
+    if (x >= d.x0 && x < d.x1 && z >= d.z0 && z < d.z1) return d.name;
   }
-
-  MB.CFG = CFG;
-  MB.PALETTE = PALETTE;
-  MB.S = freshState();
-  MB.resetState = function (keepProgress) {
-    const saved = keepProgress ? { missionIndex: MB.S.missionIndex, cash: MB.S.cash } : null;
-    MB.S = freshState();
-    if (saved) { MB.S.missionIndex = saved.missionIndex; MB.S.cash = saved.cash; }
-  };
-  // Live world references, filled in by main.js and the world builders.
-  MB.W = {
-    scene: null, camera: null, renderer: null, clock: null,
-    colliders: [],             // {minX,maxX,minZ,maxZ} building boxes
-    roadCars: [],              // traffic + parked cars
-    peds: [],
-    cops: [],
-    enemies: [],
-    missionCars: {},
-    playerMesh: null,
-    player: null,              // {pos:Vector3, heading, vel, onFoot...}
-    currentCar: null,
-    beacon: null,
-    minimapDirty: true,
-  };
-})();
+  return 'MERIDIAN BAY';
+}

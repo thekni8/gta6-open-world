@@ -1,171 +1,92 @@
-/* Staged scenes for screenshots and playtesting. ?scene=cover|foot|
-   drive|mission jumps straight into a dense, mission-active moment
-   with the full HUD on — no menu in the way. The same staging calls
-   are exposed for the shot script to re-pose a scene right before
-   capture. Nothing here is a cheat: every scene is reachable in play. */
-(function () {
-  function putPlayerInCar(x, z, heading, colorHex, speed) {
-    // Remove the previous player car outright: exiting it would leave it
-    // parked on the spawn point, and the new car would spawn inside it.
-    if (MB.S.inCar && MB.W.currentCar) {
-      const old = MB.W.currentCar;
-      MB.S.inCar = false; MB.S.carId = null; MB.W.currentCar = null;
-      MB.Cars.removeCar(old);
-    }
-    const car = MB.Cars.createCar(x, z, heading, { color: colorHex });
-    MB.W.roadCars.push(car);
-    car.speed = speed || 0;
-    MB.Cars.enterCar(car);
-    MB.W.player.pos.set(x, 0, z);
-    return car;
-  }
+// Screenshot staging: ?shot=cover|foot|drive|mission stages a dense, live
+// scene — an active mission with a countdown, traffic and pedestrians in
+// frame, police close in the chase shot — then the camera is placed for it.
+// Every shot shows the full HUD: big minimap, stars, objective + timer.
+import { Car, randomCarColor } from './vehicles/cars.js';
 
-  function putPlayerOnFoot(x, z, heading) {
-    if (MB.S.inCar) MB.Cars.exitCar();
-    MB.W.player.pos.set(x, 0, z);
-    MB.W.player.heading = heading;
-    MB.W.playerMesh.position.set(x, 0, z);
-    MB.W.playerMesh.rotation.y = heading;
-  }
+export function scenarioFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('shot');
+}
 
-  function placeCop(x, z, heading, speed, cruise) {
-    const cop = MB.Chase.spawnCop(false);
-    cop.pos.set(x, 0, z);
-    cop.heading = heading;
-    cop.speed = speed || 8;
-    if (cruise) {
-      cop.ai.state = 'cruise';
-      cop.ai.cruiseSpeed = speed || 8;
-    }
-    MB.Cars.syncMesh(cop, 0);
-    return cop;
-  }
+function givePlayerCar(game, x, z, angle, color = 0x118ab2) {
+  const car = new Car(game.scene, { x, z, angle, color, kind: 'sedan' });
+  car.driver = 'player';
+  game.enterCar(car, { silent: true });
+  return car;
+}
 
-  function clearCops() { MB.Chase.clearAll(); }
-
-  function beginPlaying() {
-    MB.Menus.hideStart();
-    MB.HUD.show();
-    MB.S.mode = 'playing';
-  }
-
-  // COVER: Mission 3 getaway north up the beachfront road — wanted 3,
-  // cruisers flanking close behind and one blocking ahead, sea on the
-  // right, city on the left, timer running.
-  function stageCover() {
-    MB.Missions.startMission(2);
-    const rt = MB.Missions.runtime();
-    rt.timer = 239; // 3:59
-    const car = putPlayerInCar(180, 60, Math.PI, 0xd33a2c, 15);
-    clearCops();
-    MB.Wanted.setWanted(3);
-    clearCops();
-    // Cruisers ahead-flanking the player car — large in frame, cruising
-    // in formation so they hold the shot instead of ramming.
-    placeCop(174, 48, Math.PI, 14, true);
-    placeCop(186, 50, Math.PI, 14, true);
-    // One blocker further ahead on the road.
-    placeCop(180, 28, Math.PI, 6, true);
-    // Civilian traffic ahead, for density.
-    const t1 = MB.Cars.createCar(183, 6, Math.PI, { color: 0x2fae5f });
-    t1.ai = { kind: 'traffic', vertical: true, line: 180, dir: -1, speed: 10 };
-    t1.speed = 10;
-    MB.W.roadCars.push(t1);
-    const t2 = MB.Cars.createCar(177, -16, 0, { color: 0xf2c14e });
-    t2.ai = { kind: 'traffic', vertical: true, line: 180, dir: 1, speed: 10 };
-    t2.speed = 10;
-    MB.W.roadCars.push(t2);
-    MB.CameraRig.setYaw(Math.PI);
-    MB.CameraRig.setPitch(0.3);
-    return car;
-  }
-
-  // FOOT: Mission 1 on foot downtown, standing on the road with the
-  // delivery car ahead and the street canyon in frame.
-  function stageFoot() {
-    MB.Missions.startMission(0);
-    const rt = MB.Missions.runtime();
-    rt.timer = 150; // 2:30
-    // Delivery car ahead of the player, in frame.
-    const car = MB.W.missionCars.delivery;
-    if (car) { car.pos.set(3, 0, 20); car.heading = Math.PI; MB.Cars.syncMesh(car, 0); }
-    // Two pedestrians on the sidewalks nearby, for life.
-    if (MB.W.peds[0]) { MB.W.peds[0].pos.set(9, 0, 18); MB.W.peds[0].target = { x: 9, z: -40 }; }
-    if (MB.W.peds[1]) { MB.W.peds[1].pos.set(-9, 0, 44); MB.W.peds[1].target = { x: -9, z: 90 }; }
-    putPlayerOnFoot(0, 30, Math.PI * 0.96);
-    MB.CameraRig.setYaw(Math.PI * 0.96);
-    MB.CameraRig.setPitch(0.3);
-  }
-
-  // DRIVE: Mission 1 delivery leg, speeding down the beachfront strip.
-  function stageDrive() {
-    MB.Missions.startMission(0);
-    const rt = MB.Missions.runtime();
-    rt.timer = 150;
-    rt.step = 1; // already in the car, driving to the marina
-    MB.Missions.updateBeacon();
-    const car = MB.W.missionCars.delivery;
-    if (car) {
-      car.pos.set(180, 0, -60);
-      car.heading = 0; // south, down the beachfront road
-      car.speed = 17;
-      MB.Cars.enterCar(car);
-    } else {
-      putPlayerInCar(180, -60, 0, 0x2c6fd3, 17);
-    }
-    // Traffic ahead on the road so the frame reads busy.
-    const t1 = MB.Cars.createCar(183, -28, 0, { color: 0xd33a2c });
-    t1.ai = { kind: 'traffic', vertical: true, line: 180, dir: 1, speed: 10 };
-    t1.speed = 10;
-    MB.W.roadCars.push(t1);
-    const t2 = MB.Cars.createCar(177, -6, Math.PI, { color: 0x2fae5f });
-    t2.ai = { kind: 'traffic', vertical: true, line: 180, dir: -1, speed: 10 };
-    t2.speed = 10;
-    MB.W.roadCars.push(t2);
-    MB.CameraRig.setYaw(0);
-    MB.CameraRig.setPitch(0.38);
-  }
-
-  // MISSION: Mission 4 shootout at the port — gunmen in frame.
-  function stageMission() {
-    MB.Missions.startMission(3);
-    const rt = MB.Missions.runtime();
-    rt.timer = 299; // 4:59
-    rt.step = 1;
-    rt.killsNeeded = 6;
-    MB.Weapons.clearEnemies();
-    // Gunmen staged in the open, just ahead of the player, with the
-    // container yard as a colorful backdrop — all six in the eyeline.
-    [[-11, -200], [-4, -206], [5, -201], [12, -207], [-1, -212], [16, -199]].forEach(function (s) {
-      MB.Weapons.spawnEnemy(s[0], s[1]);
+function addTrafficOnRoad(game, roadZ, xs, angle) {
+  for (const x of xs) {
+    const car = new Car(game.scene, {
+      x, z: roadZ + (Math.random() < 0.5 ? -3 : 3),
+      angle,
+      color: randomCarColor(game.rng),
+      kind: 'sedan',
     });
-    putPlayerOnFoot(0, -186, Math.PI);
-    MB.CameraRig.setYaw(Math.PI);
-    MB.CameraRig.setPitch(0.36);
-    MB.Missions.updateBeacon();
+    car.driver = 'traffic';
+    car.route = { horizontal: true, line: roadZ, dir: angle < 0 ? 1 : -1, targetSpeed: 11 };
+    car.speed = 9;
+    game.traffic.cars.push(car);
   }
+}
 
-  function applyFromUrl() {
-    const q = new URLSearchParams(window.location.search);
-    const scene = q.get('scene');
-    if (!scene) return false;
-    beginPlaying();
-    if (scene === 'cover') stageCover();
-    else if (scene === 'foot') stageFoot();
-    else if (scene === 'drive') stageDrive();
-    else if (scene === 'mission') stageMission();
-    else return false;
-    return true;
+function addPedsNear(game, cx, cz, count) {
+  for (let i = 0; i < count; i++) {
+    const x = cx + (Math.random() - 0.5) * 46;
+    const z = cz + (Math.random() - 0.5) * 36;
+    const ped = game.peds._makePed(x, z);
+    game.peds.peds.push(ped);
   }
+}
 
-  MB.Scenarios = {
-    applyFromUrl: applyFromUrl,
-    stageCover: stageCover,
-    stageFoot: stageFoot,
-    stageDrive: stageDrive,
-    stageMission: stageMission,
-    putPlayerInCar: putPlayerInCar,
-    putPlayerOnFoot: putPlayerOnFoot,
-    placeCop: placeCop,
-  };
-})();
+export function applyScenario(game, name) {
+  const player = game.player;
+  if (name === 'cover') {
+    // Police chase on the beachfront avenue: wanted 3, mission live,
+    // cruisers flanking and a roadblock ahead, traffic and peds in frame.
+    game.missions.startMission(2); // Heat Run — wanted 3 + timer
+    givePlayerCar(game, -52, 168, -Math.PI / 2, 0x118ab2);
+    player.car.speed = 24;
+    game.police.spawnCruiser(game, -66, 162); // flanking behind-left
+    game.police.spawnCruiser(game, -44, 174); // flanking right
+    game.police.spawnCruiser(game, -78, 168); // chasing behind
+    for (const c of game.police.cars) { c.speed = 22; c.angle = -Math.PI / 2; }
+    game.police.spawnRoadblock(game); // ahead on the avenue
+    addTrafficOnRoad(game, 168, [-20, 8, 30, -95], -Math.PI / 2);
+    addPedsNear(game, -40, 180, 8);
+    game.cameraRig.setView(Math.PI / 2 + 0.25, 0.5, 13);
+    game.cameraRig.firstFrame = true;
+  } else if (name === 'foot') {
+    // On foot downtown: mission live, peds and traffic all around.
+    game.missions.startMission(0); // First Delivery — timer running
+    player.pos.set(-6, 0, 30);
+    player.angle = Math.PI * 0.85;
+    addPedsNear(game, 0, 28, 12);
+    addTrafficOnRoad(game, 28, [-40, -12, 24, 52], -Math.PI / 2);
+    addTrafficOnRoad(game, -28, [-30, 10, 44], Math.PI / 2);
+    game.cameraRig.setView(Math.PI * 0.9, 0.5, 10);
+    game.cameraRig.firstFrame = true;
+  } else if (name === 'drive') {
+    // Speeding along the beachfront strip: palms, sea, mission + timer.
+    game.missions.startMission(1); // Borrowed Wheels — timer running
+    givePlayerCar(game, -70, 168, -Math.PI / 2, 0xd94f3d);
+    player.car.speed = 27;
+    addTrafficOnRoad(game, 168, [-30, 5, 40, -105, 70], -Math.PI / 2);
+    addPedsNear(game, -50, 185, 8);
+    game.cameraRig.setView(Math.PI / 2 + 0.15, 0.42, 13);
+    game.cameraRig.firstFrame = true;
+  } else if (name === 'mission') {
+    // Port Ambush shootout: gunmen with health bars, crates and cranes.
+    game.missions.startMission(3);
+    // Jump straight to the shootout step.
+    game.missions.active.stepIndex = 1;
+    game.missions._enterStep();
+    player.pos.set(-206, 0, 74);
+    player.angle = Math.PI * 1.25;
+    // One gunman close and visible, mid-frame.
+    game.weapons.spawnEnemy(game, -214, 62);
+    game.cameraRig.setView(Math.PI * 1.2, 0.45, 9);
+    game.cameraRig.firstFrame = true;
+  }
+}
