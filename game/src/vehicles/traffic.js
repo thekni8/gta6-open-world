@@ -81,8 +81,11 @@ export class Traffic {
       car.group.rotation.y = car.heading;
       const spin = (car.speed * dt) / 0.36;
       for (const w of car.group.userData.wheels) w.rotation.x += spin;
-      // Respawn far-off cars back into the city so traffic never thins out.
-      if (Math.abs(car.pos.x) > 320 || Math.abs(car.pos.z) > 320) {
+      // A car that drove off the road grid (past the edge roads, out onto
+      // the beach or the port apron) gets recycled back into the city —
+      // otherwise it sits against the bowl clamp forever, and one once
+      // ran a player down on the sand by the marina.
+      if (Math.abs(car.pos.x) > 264 || Math.abs(car.pos.z) > 264) {
         const p = this.city.randomRoadPoint();
         car.pos.set(p.x, 0, p.z);
         car.speed = 0;

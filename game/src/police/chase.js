@@ -18,6 +18,13 @@ export class Police {
     this.flashTimer = 0;
     this.blockTimer = 0;
     this.onRam = null; // () => {} — wired by main for damage + shake
+    // Chase pressure: a fresh escalation (stars rising) bootstraps the
+    // fleet once; after that, replacements only arrive while the player
+    // is seen. A chaser that loses the trail while the player is unseen
+    // is NOT replaced — that is how the player loses the cops.
+    this.reinforce = false;
+    this.bootstrapped = false;
+    this.lastStars = 0;
   }
 
   makeInterceptor(x, z, heading) {
@@ -91,13 +98,27 @@ export class Police {
       );
       car.speed = 0;
       car.blocker = true;
+      car.blockAge = 0;
       this.cars.push(car);
     }
   }
 
-  /** Can any police car see the player right now? */
+  /** Remove every parked roadblock car (one roadblock at a time). */
+  clearBlockers() {
+    for (let i = this.cars.length - 1; i >= 0; i--) {
+      if (this.cars[i].blocker) {
+        this.cars[i].remove();
+        this.cars.splice(i, 1);
+      }
+    }
+  }
+
+  /** Can any CHASING police car see the player right now? Parked
+   *  roadblock cars are obstacles, not surveillance — they don't count,
+   *  or a roadblock ahead would keep the player "seen" forever. */
   canSee(playerPos) {
     for (const car of this.cars) {
+      if (car.blocker) continue;
       const d = Math.hypot(car.pos.x - playerPos.x, car.pos.z - playerPos.z);
       if (d < CONFIG.police.sight) return true;
     }
@@ -112,15 +133,33 @@ export class Police {
   update(dt, stars, playerPos, playerHeading, playerCar, playerSpeed, onPlayerHit) {
     this.flashTimer += dt;
     const flash = Math.floor(this.flashTimer * 6) % 2 === 0;
+    // Track the chase episode: a rise in stars re-arms the bootstrap, and
+    // clean heat resets it.
+    if (stars > this.lastStars) {
+      this.reinforce = true;
+      this.bootstrapped = false;
+    }
+    if (stars === 0) {
+      this.reinforce = false;
+      this.bootstrapped = false;
+    }
+    this.lastStars = stars;
     // Match the fleet to the wanted level. Roadblock cars are parked, not
     // chasers: they never count toward the fleet size and are never trimmed
     // for it, or a fresh roadblock would evict its own chasers (or itself).
     const want = this.desiredCount(stars);
     const chasers = this.cars.filter((c) => !c.blocker);
-    while (chasers.length < want) {
-      const spawned = this.spawnNear(playerPos);
-      if (!spawned) break;
-      chasers.push(spawned);
+    const seen = this.canSee(playerPos);
+    // Top the fleet up only while the player is seen — or once, to
+    // bootstrap a fresh chase. While unseen, a retired chaser is not
+    // replaced: outrun the fleet and the heat genuinely dies.
+    if (this.reinforce && (seen || (chasers.length === 0 && !this.bootstrapped))) {
+      while (chasers.length < want) {
+        const spawned = this.spawnNear(playerPos);
+        if (!spawned) break;
+        chasers.push(spawned);
+      }
+      if (chasers.length > 0) this.bootstrapped = true;
     }
     while (chasers.length > want) {
       // Drop the farthest chaser first.
@@ -137,17 +176,25 @@ export class Police {
       dropped.remove();
       this.cars.splice(this.cars.indexOf(dropped), 1);
     }
-    // Roadblocks at 3+ stars, at most once per cooldown.
+    // Roadblocks at 3+ stars, at most once per cooldown — and only one
+    // roadblock on the road at a time, so parked interceptors never pile up.
     this.blockTimer -= dt;
     if (stars >= CONFIG.police.roadblockStars && this.blockTimer <= 0) {
+      this.clearBlockers();
       this.roadblock(playerPos, playerHeading);
       this.blockTimer = CONFIG.police.roadblockCooldown;
     }
-    const retire = []; // chasers that lost the trail this frame
+    const retire = []; // chasers that lost the trail, blockers that gave up
     for (const car of this.cars) {
       car.lightRed.visible = flash;
       car.lightBlue.visible = !flash;
-      if (car.blocker) continue; // parked across the road, just flashing
+      if (car.blocker) {
+        // Parked across the road, just flashing — for 40 s, then it gives
+        // up and leaves, so a long chase never litters the city with them.
+        car.blockAge += dt;
+        if (car.blockAge > 40) retire.push(car);
+        continue;
+      }
       // Chase: aim a little ahead of a moving player (interception), then
       // steer, throttle up, and ram on contact.
       const lead = playerCar ? Math.min(1.2, playerSpeed * 0.03) : 0;
@@ -190,13 +237,6 @@ export class Police {
       this.cars.splice(this.cars.indexOf(car), 1);
     }
     // Drop blockers once the heat is gone.
-    if (stars < CONFIG.police.roadblockStars) {
-      for (let i = this.cars.length - 1; i >= 0; i--) {
-        if (this.cars[i].blocker) {
-          this.cars[i].remove();
-          this.cars.splice(i, 1);
-        }
-      }
-    }
+    if (stars < CONFIG.police.roadblockStars) this.clearBlockers();
   }
 }
