@@ -228,6 +228,9 @@ export class Weapons {
 }
 
 // Slab-method ray vs AABB (y is 0..60 for buildings). Returns t or null.
+// A collider containing the ray origin (tMin ~ 0) never blocks: the muzzle
+// is at the player's chest, and a shot must not die at distance 0 because
+// the player happens to stand inside a crane's footprint.
 function rayHitsBox(origin, dir, box, maxT) {
   let tMin = 0;
   let tMax = maxT;
@@ -248,5 +251,6 @@ function rayHitsBox(origin, dir, box, maxT) {
       if (tMin > tMax) return null;
     }
   }
+  if (tMin <= 0.01) return null;
   return tMin;
 }

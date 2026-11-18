@@ -110,6 +110,10 @@ export class Player {
         game.sound.step();
         this.stepTimer = this.sprinting ? 0.28 : 0.38;
       }
+    } else {
+      // Idle but inside a collider (teleport, spawn, shove): push out so
+      // the player is never stuck inside a wall or a crane's footprint.
+      this.city.collideCircle(this.pos, CONFIG.player.radius);
     }
     // Walk-cycle animation.
     const swing = this.moving ? Math.sin(this.walkPhase) * 0.6 : 0;
