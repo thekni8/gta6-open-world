@@ -133,7 +133,11 @@ export function applyScenario(game, name) {
     addPedAt(game, -70, 19);
     addPedAt(game, -40, 19);
     addPedAt(game, -35, 37);
-    game.cameraRig.setView(Math.PI / 2 + 0.6, 0.4, 12);
+    // Pulled back + steeper pitch so the player's own car sits fully in
+    // frame at the bottom instead of being cut off at the corner.
+    // Angled three-quarter rear view, pulled back: the car sits in frame
+    // at the bottom with the avenue and cross-traffic ahead.
+    game.cameraRig.setView(Math.PI / 2 + 0.6, 0.5, 16);
     game.cameraRig.firstFrame = true;
   } else if (name === 'mission') {
     // Port Ambush mid-firefight: gunmen with health bars among double-

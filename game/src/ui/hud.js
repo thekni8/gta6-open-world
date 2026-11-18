@@ -18,6 +18,7 @@ export class Hud {
     this.zoneTimer = 0;
     this.toastTimer = 0;
     this.lastZone = '';
+    this.hitNumbers = []; // floating damage numbers, animated in update()
     this.el['mission-overlay-btn']?.addEventListener('click', () => {
       this.game.sound.ensure();
       this.game.sound.uiClick();
@@ -38,7 +39,10 @@ export class Hud {
     this.el.toast.classList.remove('visible');
   }
 
-  // Floating "-34" damage number near the crosshair.
+  // Floating "-34" damage number near the crosshair. Animated on game
+  // time in update() — a real-time setTimeout/rAF fade vanishes unseen
+  // on a slow frame, but game time keeps the number visible for its full
+  // 0.9s at any frame rate.
   showDamageNumber(amount) {
     const layer = this.el['hit-layer'];
     if (!layer) return;
@@ -50,8 +54,7 @@ export class Hud {
     div.style.left = `calc(50% + ${ox}px)`;
     div.style.top = `calc(50% + ${oy}px)`;
     layer.appendChild(div);
-    requestAnimationFrame(() => div.classList.add('fly'));
-    setTimeout(() => div.remove(), 900);
+    this.hitNumbers.push({ el: div, life: 0.9, max: 0.9 });
   }
 
   showZone(name) {
@@ -120,6 +123,19 @@ export class Hud {
     if (this.toastTimer > 0) {
       this.toastTimer -= dt;
       if (this.toastTimer <= 0) this.el.toast.classList.remove('visible');
+    }
+    // Damage numbers rise and fade on game time.
+    for (let i = this.hitNumbers.length - 1; i >= 0; i--) {
+      const h = this.hitNumbers[i];
+      h.life -= dt;
+      if (h.life <= 0) {
+        h.el.remove();
+        this.hitNumbers.splice(i, 1);
+        continue;
+      }
+      const t = 1 - h.life / h.max;
+      h.el.style.transform = `translateY(${(-46 * t).toFixed(1)}px)`;
+      h.el.style.opacity = h.life < 0.35 ? (h.life / 0.35).toFixed(2) : '1';
     }
     // Health.
     const hp = Math.max(0, Math.round(player.health));
