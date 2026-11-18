@@ -31,8 +31,10 @@ export class Input {
         this.mouseDY += e.movementY || 0;
       }
     });
+    // Only clicks on the game canvas itself count as attacks — clicks on
+    // menu buttons and overlays must never fire the pistol.
     document.addEventListener('mousedown', (e) => {
-      if (e.button === 0) {
+      if (e.button === 0 && e.target === this.canvas) {
         this.mouseDown = true;
         this.mousePressed = true;
       }
