@@ -299,6 +299,8 @@ export class Enemies {
         health: CONFIG.combat.enemyHealth,
         shootTimer: range(this.rng, 0.5, 1.5),
         heading: 0,
+        side: 0, // wall-following direction, picked when the shot is blocked
+        stuckTimer: 0,
       };
       enemy.damage = (amount) => {
         enemy.health -= amount;
@@ -340,9 +342,21 @@ export class Enemies {
       // see the player walks around the container until he can — he never
       // just stands behind a box shooting through it). Hold and shoot
       // only when near with a clear line.
+      if (los) e.side = 0;
       if (dist > 26 || !los) {
-        e.pos.x += Math.sin(e.heading) * CONFIG.combat.enemyChaseSpeed * dt;
-        e.pos.z += Math.cos(e.heading) * CONFIG.combat.enemyChaseSpeed * dt;
+        // Blocked: commit to one way around the obstacle — a straight
+        // push at the player just pins the gunman against the wall, so
+        // he sidesteps diagonally until the shot clears.
+        if (!los && e.stuckTimer <= 0) {
+          e.stuckTimer = 4;
+          if (!e.side) e.side = this.rng() < 0.5 ? 1 : -1;
+        }
+        if (e.stuckTimer > 0) e.stuckTimer -= dt;
+        const moveHeading = !los && e.side !== 0
+          ? e.heading + e.side * 1.1
+          : e.heading;
+        e.pos.x += Math.sin(moveHeading) * CONFIG.combat.enemyChaseSpeed * dt;
+        e.pos.z += Math.cos(moveHeading) * CONFIG.combat.enemyChaseSpeed * dt;
         this.city.collideCircle(e.pos, 0.5);
         e.mesh.position.copy(e.pos);
       }
