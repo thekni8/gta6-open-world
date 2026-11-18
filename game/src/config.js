@@ -90,8 +90,10 @@ export const CFG = {
 
 // Named places the missions, HUD and minimap all agree on.
 export const LANDMARKS = {
-  safehouse: { x: -210, z: -210, name: 'Kai\'s Safehouse' },
-  garage: { x: 210, z: 150, name: 'Harbor Kings Garage' },
+  // Landmarks sit on roads or road edges, never inside a block: a player
+  // teleported to one must not land inside a building and get shoved out.
+  safehouse: { x: -180, z: -210, name: 'Kai\'s Safehouse' },
+  garage: { x: 210, z: 120, name: 'Harbor Kings Garage' },
   sprayShop: { x: 60, z: -210, name: 'Spray & Lay Low' },
   port: { x: 225, z: 60, name: 'Meridian Port' },
   downtown: { x: 0, z: 0, name: 'Downtown' },

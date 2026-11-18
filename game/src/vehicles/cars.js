@@ -5,6 +5,7 @@
 
 import { CFG, CAR_COLORS } from '../config.js';
 import { clamp, angleLerp } from '../util/random.js';
+import { mergeGeometries, translationMatrix } from '../util/merge.js';
 
 const THREE = window.THREE;
 
@@ -20,41 +21,48 @@ export function buildCarMesh(color, kind) {
   const bodyLen = kind === 'truck' ? 5.4 : 4.4;
   const bodyH = tall ? 1.5 : 0.85;
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, bodyH, bodyLen), bodyMat);
-  body.position.y = 0.75;
+  // Body + cabin share one material: merge them into a single mesh.
+  const bodyGeos = [
+    new THREE.BoxGeometry(2.0, bodyH, bodyLen).applyMatrix4(translationMatrix(0, 0.75, 0)),
+  ];
+  if (!tall) {
+    bodyGeos.push(
+      new THREE.BoxGeometry(1.8, 0.75, 2.2).applyMatrix4(translationMatrix(0, 1.5, -0.25)),
+    );
+  }
+  const body = new THREE.Mesh(mergeGeometries(bodyGeos), bodyMat);
   body.castShadow = true;
   group.add(body);
 
+  // Glass: windshield + rear window (or the van cab) merged.
+  const glassGeos = [];
   if (!tall) {
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.75, 2.2), bodyMat);
-    cabin.position.set(0, 1.5, -0.25);
-    cabin.castShadow = true;
-    group.add(cabin);
-    const windshield = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.6, 0.1), glassMat);
-    windshield.position.set(0, 1.5, 0.88);
-    windshield.rotation.x = 0.25;
-    group.add(windshield);
-    const rearGlass = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.55, 0.1), glassMat);
-    rearGlass.position.set(0, 1.5, -1.38);
-    rearGlass.rotation.x = -0.2;
-    group.add(rearGlass);
+    glassGeos.push(
+      new THREE.BoxGeometry(1.7, 0.6, 0.1).applyMatrix4(translationMatrix(0, 1.5, 0.88, 0, 0.25, 0)),
+      new THREE.BoxGeometry(1.7, 0.55, 0.1).applyMatrix4(translationMatrix(0, 1.5, -1.38, 0, -0.2, 0)),
+    );
   } else {
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.8, 1.4), glassMat);
-    cab.position.set(0, 1.8, bodyLen / 2 - 0.8);
-    group.add(cab);
+    glassGeos.push(
+      new THREE.BoxGeometry(1.9, 0.8, 1.4).applyMatrix4(translationMatrix(0, 1.8, bodyLen / 2 - 0.8)),
+    );
   }
+  group.add(new THREE.Mesh(mergeGeometries(glassGeos), glassMat));
 
-  // Headlights and taillights.
+  // Headlights and taillights, each pair merged.
   const headMat = new THREE.MeshLambertMaterial({ color: 0xfff6b8, emissive: 0x555533 });
   const tailMat = new THREE.MeshLambertMaterial({ color: 0xff2222, emissive: 0x550000 });
+  const headGeos = [];
+  const tailGeos = [];
   for (const sx of [-0.7, 0.7]) {
-    const h = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 0.08), headMat);
-    h.position.set(sx, 0.78, bodyLen / 2 + 0.02);
-    group.add(h);
-    const t = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 0.08), tailMat);
-    t.position.set(sx, 0.78, -bodyLen / 2 - 0.02);
-    group.add(t);
+    headGeos.push(
+      new THREE.BoxGeometry(0.42, 0.22, 0.08).applyMatrix4(translationMatrix(sx, 0.78, bodyLen / 2 + 0.02)),
+    );
+    tailGeos.push(
+      new THREE.BoxGeometry(0.42, 0.22, 0.08).applyMatrix4(translationMatrix(sx, 0.78, -bodyLen / 2 - 0.02)),
+    );
   }
+  group.add(new THREE.Mesh(mergeGeometries(headGeos), headMat));
+  group.add(new THREE.Mesh(mergeGeometries(tailGeos), tailMat));
   const bumper = new THREE.Mesh(new THREE.BoxGeometry(2.05, 0.18, 0.18), chromeMat);
   bumper.position.set(0, 0.42, bodyLen / 2 + 0.05);
   group.add(bumper);
@@ -204,7 +212,8 @@ export class Car {
     }
     this.speed *= 0.45;
     if (impact > 6) {
-      this.damage(impact * 0.9);
+      // Police take less wall damage — they ram through the city for a living.
+      this.damage(impact * (this.driver === 'police' ? 0.35 : 0.9));
       this.G.fx.sparks(this.x, 1, this.z, Math.min(14, impact | 0));
       this.G.audio.crash(Math.min(1, impact / 30));
       if (this.driver === 'player') this.G.fx.shake(Math.min(0.7, impact / 40));
@@ -273,6 +282,11 @@ export class PlayerDriving {
     this.checkPedCollisions(car, dt);
     car.updateSmoke(dt);
     car.syncMesh();
+    // Kai's position IS the car's while driving — every other system
+    // (police, wanted, missions, minimap) reads the player's position.
+    G.player.x = car.x;
+    G.player.z = car.z;
+    G.player.heading = car.heading;
     // Skid marks while drifting or handbraking hard.
     this.skidTimer -= dt;
     if ((car.drifting || (handbrake && Math.abs(car.speed) > 6)) && this.skidTimer <= 0) {

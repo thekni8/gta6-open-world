@@ -127,6 +127,9 @@ export class Pedestrians {
     this.G = G;
     this.rng = new SeededRandom(G.seed + 31);
     this.list = [];
+    // Register on G before spawning: a Pedestrian reads G.peds.rng while
+    // picking its first sidewalk target.
+    G.peds = this;
     for (let i = 0; i < CFG.pedestrianCount; i++) {
       this.spawnPed(true);
     }

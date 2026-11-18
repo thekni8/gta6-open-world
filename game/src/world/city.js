@@ -1,10 +1,13 @@
 // Meridian Bay itself: roads, blocks, buildings, beach, port and props.
 // The layout is seeded, so the same seed always builds the same city.
+// Static scenery is merged into one mesh per material (see util/merge.js),
+// so the whole city renders in a few dozen draw calls instead of a thousand.
 // Collision is a flat list of axis-aligned boxes the gameplay code pushes
 // circles out of — cheap, and good enough for arcade driving and walking.
 
 import { CFG, PALETTES, districtAt } from '../config.js';
 import { SeededRandom } from '../util/random.js';
+import { GeometryBuckets, translationMatrix, mergeGeometries } from '../util/merge.js';
 
 const THREE = window.THREE;
 
@@ -38,9 +41,10 @@ function makeRoadTexture() {
     g.fillStyle = Math.random() > 0.5 ? '#42474e' : '#32363c';
     g.fillRect(Math.random() * 128, Math.random() * 128, 3, 3);
   }
+  // Yellow dashed centre line along the road, white edge lines.
   g.fillStyle = '#f5d76e';
-  g.fillRect(62, 8, 4, 48);
-  g.fillRect(62, 72, 4, 48);
+  g.fillRect(8, 62, 48, 4);
+  g.fillRect(72, 62, 48, 4);
   g.fillStyle = '#dfe6e9';
   g.fillRect(0, 4, 128, 2);
   g.fillRect(0, 122, 128, 2);
@@ -61,6 +65,8 @@ export class City {
     this.boats = [];
     this.windowTex = makeWindowTexture();
     this.roadTex = makeRoadTexture();
+    this.buildingMats = new Map();
+    this.buckets = new GeometryBuckets(this.group);
     this.buildGround();
     this.buildRoads();
     this.buildBlocks();
@@ -68,7 +74,17 @@ export class City {
     this.buildPortProps();
     this.buildPalmsAndLights();
     this.buildClouds();
+    this.buckets.flush(true, true);
     G.scene.add(this.group);
+  }
+
+  buildingMaterial(color) {
+    let mat = this.buildingMats.get(color);
+    if (!mat) {
+      mat = new THREE.MeshLambertMaterial({ map: this.windowTex, color });
+      this.buildingMats.set(color, mat);
+    }
+    return mat;
   }
 
   addCollider(minX, maxX, minZ, maxZ) {
@@ -76,14 +92,14 @@ export class City {
   }
 
   buildGround() {
-    const geo = new THREE.PlaneGeometry(1400, 1400);
-    const mat = new THREE.MeshLambertMaterial({ color: 0x7d9b6a });
-    const ground = new THREE.Mesh(geo, mat);
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(1400, 1400),
+      new THREE.MeshLambertMaterial({ color: 0x7d9b6a }),
+    );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.05;
     ground.receiveShadow = true;
     this.group.add(ground);
-    // City slab: pale concrete under the whole built-up area.
     const slab = new THREE.Mesh(
       new THREE.PlaneGeometry(560, 560),
       new THREE.MeshLambertMaterial({ color: 0xb9b3a4 }),
@@ -96,55 +112,39 @@ export class City {
 
   buildRoads() {
     const len = 560;
+    const roadMat = new THREE.MeshLambertMaterial({ map: this.roadTex });
+    const walkMat = new THREE.MeshLambertMaterial({ color: 0xd8d2c2 });
     for (const c of CFG.roadCoords) {
       // Sidewalk apron under each road, then the asphalt strip on top.
-      for (const [width, y, mat] of [
-        [22, 0.02, new THREE.MeshLambertMaterial({ color: 0xd8d2c2 })],
-        [14, 0.05, null],
+      for (const [width, y, mat, uvU] of [
+        [22, 0.02, walkMat, 1],
+        [14, 0.05, roadMat, len / 16],
       ]) {
-        const m = mat || new THREE.MeshLambertMaterial({ map: this.roadTex.clone() });
-        if (!mat) {
-          m.map.needsUpdate = true;
-          m.map.repeat.set(len / 16, 1);
-        }
-        const stripX = new THREE.Mesh(new THREE.PlaneGeometry(len, width), m);
-        stripX.rotation.x = -Math.PI / 2;
-        stripX.position.set(0, y, c);
-        stripX.receiveShadow = true;
-        this.group.add(stripX);
-        const stripZ = new THREE.Mesh(new THREE.PlaneGeometry(len, width), m);
-        stripZ.rotation.x = -Math.PI / 2;
-        stripZ.rotation.z = Math.PI / 2;
-        stripZ.position.set(c, y, 0);
-        stripZ.receiveShadow = true;
-        this.group.add(stripZ);
+        const geoX = new THREE.PlaneGeometry(len, width);
+        const uvX = geoX.attributes.uv;
+        for (let i = 0; i < uvX.count; i++) uvX.setXY(i, uvX.getX(i) * uvU, uvX.getY(i));
+        this.buckets.add(mat, geoX, translationMatrix(0, y, c, 0, -Math.PI / 2, 0));
+        const geoZ = new THREE.PlaneGeometry(len, width);
+        const uvZ = geoZ.attributes.uv;
+        for (let i = 0; i < uvZ.count; i++) uvZ.setXY(i, uvZ.getX(i) * uvU, uvZ.getY(i));
+        this.buckets.add(mat, geoZ, translationMatrix(c, y, 0, 0, -Math.PI / 2, Math.PI / 2));
       }
     }
   }
 
-  buildingMaterial(color, w, h) {
-    const tex = this.windowTex.clone();
-    tex.needsUpdate = true;
-    tex.repeat.set(Math.max(1, Math.round(w / 9)), Math.max(1, Math.round(h / 11)));
-    return new THREE.MeshLambertMaterial({ map: tex, color });
+  addBuilding(x, z, w, h, d, color) {
+    // Windows tile by world size via UV scaling, so towers keep small windows.
+    this.buckets.box(
+      this.buildingMaterial(color), w, h, d, x, h / 2, z, 0,
+      Math.max(1, Math.round(w / 9)), Math.max(1, Math.round(h / 11)),
+    );
+    this.buckets.box(this.roofMat(), w * 0.94, 0.6, d * 0.94, x, h + 0.3, z);
+    this.addCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2);
   }
 
-  addBuilding(x, z, w, h, d, color) {
-    const geo = new THREE.BoxGeometry(w, h, d);
-    const mesh = new THREE.Mesh(geo, this.buildingMaterial(color, w, h));
-    mesh.position.set(x, h / 2, z);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    this.group.add(mesh);
-    // Flat roof cap, slightly darker, so roofs read from above.
-    const roof = new THREE.Mesh(
-      new THREE.BoxGeometry(w * 0.94, 0.6, d * 0.94),
-      new THREE.MeshLambertMaterial({ color: 0x6b6259 }),
-    );
-    roof.position.set(x, h + 0.3, z);
-    this.group.add(roof);
-    this.addCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2);
-    return mesh;
+  roofMat() {
+    if (!this._roofMat) this._roofMat = new THREE.MeshLambertMaterial({ color: 0x6b6259 });
+    return this._roofMat;
   }
 
   buildBlocks() {
@@ -174,7 +174,6 @@ export class City {
           if (Math.abs(x - bx) + w / 2 > 21 || Math.abs(z - bz) + d / 2 > 21) continue;
           this.addBuilding(x, z, w, h, d, rng.pick(palette));
         }
-        // A tree or two on quiet blocks.
         if (!downtown && rng.chance(0.5)) {
           this.addTree(bx + rng.range(-16, 16), bz + rng.range(-16, 16));
         }
@@ -193,17 +192,22 @@ export class City {
       const x = bx + rng.range(-14, 14);
       const z = bz + rng.range(-14, 14);
       const stack = rng.chance(0.4) ? 2 : 1;
+      const mat = this.containerMat(rng.pick(colors));
       for (let s = 0; s < stack; s++) {
-        const box = new THREE.Mesh(
-          new THREE.BoxGeometry(w, h, d),
-          new THREE.MeshLambertMaterial({ color: rng.pick(colors) }),
-        );
-        box.position.set(x, h / 2 + s * h, z);
-        box.castShadow = true;
-        this.group.add(box);
+        this.buckets.box(mat, w, h, d, x, h / 2 + s * h, z);
       }
       this.addCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2);
     }
+  }
+
+  containerMat(color) {
+    if (!this._containerMats) this._containerMats = new Map();
+    let mat = this._containerMats.get(color);
+    if (!mat) {
+      mat = new THREE.MeshLambertMaterial({ color });
+      this._containerMats.set(color, mat);
+    }
+    return mat;
   }
 
   buildBeachAndSea() {
@@ -223,32 +227,25 @@ export class City {
     sea.position.set(0, 0.02, 560);
     this.group.add(sea);
     // A wooden pier jutting into the bay.
-    const pier = new THREE.Mesh(
-      new THREE.BoxGeometry(8, 1.2, 60),
-      new THREE.MeshLambertMaterial({ color: 0x8a6b4a }),
-    );
-    pier.position.set(-60, 0.6, 300);
-    pier.castShadow = true;
-    this.group.add(pier);
+    const woodMat = new THREE.MeshLambertMaterial({ color: 0x8a6b4a });
+    this.buckets.box(woodMat, 8, 1.2, 60, -60, 0.6, 300);
     this.addCollider(-64, -56, 270, 330);
     // Umbrellas and a few boats for the postcard shot.
     const rng = this.rng;
+    const poleMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const umbrellaColors = [0xe74c3c, 0x3498db, 0xf1c40f, 0xffffff];
     for (let i = 0; i < 10; i++) {
       const x = rng.range(-240, 240);
       const z = rng.range(240, 285);
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.12, 0.12, 3, 5),
-        new THREE.MeshLambertMaterial({ color: 0xffffff }),
+      this.buckets.add(
+        poleMat, new THREE.CylinderGeometry(0.12, 0.12, 3, 5),
+        translationMatrix(x, 1.5, z),
       );
-      pole.position.set(x, 1.5, z);
-      this.group.add(pole);
-      const top = new THREE.Mesh(
-        new THREE.ConeGeometry(2.6, 1.2, 8),
-        new THREE.MeshLambertMaterial({ color: rng.pick([0xe74c3c, 0x3498db, 0xf1c40f, 0xffffff]) }),
+      const topMat = this.containerMat(rng.pick(umbrellaColors));
+      this.buckets.add(
+        topMat, new THREE.ConeGeometry(2.6, 1.2, 8),
+        translationMatrix(x, 3.4, z),
       );
-      top.position.set(x, 3.4, z);
-      top.castShadow = true;
-      this.group.add(top);
     }
     for (let i = 0; i < 4; i++) {
       const boat = new THREE.Group();
@@ -273,68 +270,51 @@ export class City {
 
   buildPortProps() {
     // Two gantry cranes over the docks.
+    const craneMat = new THREE.MeshLambertMaterial({ color: 0xe67e22 });
+    const cableMat = new THREE.MeshLambertMaterial({ color: 0x2c3e50 });
     for (const [x, z] of [[248, 30], [248, 150]]) {
-      const crane = new THREE.Group();
-      const legMat = new THREE.MeshLambertMaterial({ color: 0xe67e22 });
       for (const dx of [-4, 4]) {
-        const leg = new THREE.Mesh(new THREE.BoxGeometry(1.6, 34, 1.6), legMat);
-        leg.position.set(dx, 17, 0);
-        leg.castShadow = true;
-        crane.add(leg);
+        this.buckets.box(craneMat, 1.6, 34, 1.6, x + dx, 17, z);
       }
-      const jib = new THREE.Mesh(new THREE.BoxGeometry(26, 2, 2), legMat);
-      jib.position.set(-6, 34, 0);
-      jib.castShadow = true;
-      crane.add(jib);
-      const cable = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.08, 0.08, 14, 4),
-        new THREE.MeshLambertMaterial({ color: 0x2c3e50 }),
+      this.buckets.box(craneMat, 26, 2, 2, x - 6, 34, z);
+      this.buckets.add(
+        cableMat, new THREE.CylinderGeometry(0.08, 0.08, 14, 4),
+        translationMatrix(x - 16, 27, z),
       );
-      cable.position.set(-16, 27, 0);
-      crane.add(cable);
-      crane.position.set(x, 0, z);
-      this.group.add(crane);
       this.addCollider(x - 5, x + 5, z - 2, z + 2);
     }
   }
 
   addTree(x, z) {
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.35, 0.5, 4, 6),
-      new THREE.MeshLambertMaterial({ color: 0x7a5a38 }),
+    if (!this._trunkMat) this._trunkMat = new THREE.MeshLambertMaterial({ color: 0x7a5a38 });
+    if (!this._crownMat) this._crownMat = new THREE.MeshLambertMaterial({ color: 0x3e8e4f });
+    this.buckets.add(
+      this._trunkMat, new THREE.CylinderGeometry(0.35, 0.5, 4, 6),
+      translationMatrix(x, 2, z),
     );
-    trunk.position.set(x, 2, z);
-    trunk.castShadow = true;
-    this.group.add(trunk);
-    const crown = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(3.2, 0),
-      new THREE.MeshLambertMaterial({ color: 0x3e8e4f }),
+    this.buckets.add(
+      this._crownMat, new THREE.IcosahedronGeometry(3.2, 0),
+      translationMatrix(x, 6, z),
     );
-    crown.position.set(x, 6, z);
-    crown.castShadow = true;
-    this.group.add(crown);
     this.addCollider(x - 0.6, x + 0.6, z - 0.6, z + 0.6);
   }
 
   addPalm(x, z) {
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.28, 0.42, 7, 6),
-      new THREE.MeshLambertMaterial({ color: 0x8a6b45 }),
+    if (!this._palmTrunk) this._palmTrunk = new THREE.MeshLambertMaterial({ color: 0x8a6b45 });
+    if (!this._palmFrond) this._palmFrond = new THREE.MeshLambertMaterial({ color: 0x2f9e5f });
+    this.buckets.add(
+      this._palmTrunk, new THREE.CylinderGeometry(0.28, 0.42, 7, 6),
+      translationMatrix(x, 3.5, z, 0, 0, 0.12),
     );
-    trunk.position.set(x, 3.5, z);
-    trunk.rotation.z = 0.12;
-    trunk.castShadow = true;
-    this.group.add(trunk);
     for (let i = 0; i < 6; i++) {
-      const frond = new THREE.Mesh(
-        new THREE.ConeGeometry(1.1, 5.5, 4),
-        new THREE.MeshLambertMaterial({ color: 0x2f9e5f }),
-      );
       const a = (i / 6) * Math.PI * 2;
-      frond.position.set(x + Math.cos(a) * 1.6, 7.6, z + Math.sin(a) * 1.6);
-      frond.rotation.set(Math.sin(a) * 1.1, 0, -Math.cos(a) * 1.1);
-      frond.castShadow = true;
-      this.group.add(frond);
+      this.buckets.add(
+        this._palmFrond, new THREE.ConeGeometry(1.1, 5.5, 4),
+        translationMatrix(
+          x + Math.cos(a) * 1.6, 7.6, z + Math.sin(a) * 1.6,
+          0, Math.sin(a) * 1.1, -Math.cos(a) * 1.1,
+        ),
+      );
     }
     this.addCollider(x - 0.5, x + 0.5, z - 0.5, z + 0.5);
   }
@@ -355,12 +335,14 @@ export class City {
     for (const c of CFG.roadCoords) {
       for (const [x, z] of [[c, 0], [0, c]]) {
         if (x === 0 && z === 0) continue;
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 7, 5), poleMat);
-        pole.position.set(x + 8.5, 3.5, z + 8.5);
-        this.group.add(pole);
-        const head = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 6), headMat);
-        head.position.set(x + 8.5, 7.2, z + 8.5);
-        this.group.add(head);
+        this.buckets.add(
+          poleMat, new THREE.CylinderGeometry(0.14, 0.18, 7, 5),
+          translationMatrix(x + 8.5, 3.5, z + 8.5),
+        );
+        this.buckets.add(
+          headMat, new THREE.SphereGeometry(0.45, 8, 6),
+          translationMatrix(x + 8.5, 7.2, z + 8.5),
+        );
       }
     }
   }
@@ -371,12 +353,15 @@ export class City {
     for (let i = 0; i < 9; i++) {
       const cloud = new THREE.Group();
       const puffs = rng.int(2, 4);
+      const geos = [];
       for (let k = 0; k < puffs; k++) {
-        const puff = new THREE.Mesh(new THREE.SphereGeometry(rng.range(6, 13), 8, 6), mat);
-        puff.scale.y = 0.45;
-        puff.position.set(k * rng.range(7, 11) - puffs * 4, rng.range(-1, 1), rng.range(-3, 3));
-        cloud.add(puff);
+        const puff = new THREE.SphereGeometry(rng.range(6, 13), 8, 6);
+        puff.scale(1, 0.45, 1);
+        puff.translate(k * rng.range(7, 11) - puffs * 4, rng.range(-1, 1), rng.range(-3, 3));
+        geos.push(puff);
       }
+      const merged = new THREE.Mesh(mergeGeometries(geos), mat);
+      cloud.add(merged);
       cloud.position.set(rng.range(-400, 400), rng.range(95, 130), rng.range(-400, 400));
       this.group.add(cloud);
       this.clouds.push(cloud);
@@ -418,6 +403,18 @@ export class City {
       }
     }
     return { x, z, hit, nx, nz };
+  }
+
+  // True when a point sits inside any building (with a small margin).
+  // Police and camera code probe ahead with this before committing.
+  pointInCollider(x, z, pad) {
+    const p = pad || 0;
+    for (const b of this.colliders) {
+      if (x > b.minX - p && x < b.maxX + p && z > b.minZ - p && z < b.maxZ + p) {
+        return true;
+      }
+    }
+    return false;
   }
 
   isOnRoad(x, z) {

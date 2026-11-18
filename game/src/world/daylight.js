@@ -15,8 +15,9 @@ export class Daylight {
 
     this.sun = new THREE.DirectionalLight(CFG.sunColor, CFG.sunIntensity);
     this.sun.position.set(90, 130, 60);
-    this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(CFG.shadowMapSize, CFG.shadowMapSize);
+    this.sun.castShadow = !(G.quality && G.quality.light);
+    const shadowSize = (G.quality && G.quality.shadowSize) || CFG.shadowMapSize;
+    this.sun.shadow.mapSize.set(shadowSize, shadowSize);
     const r = CFG.shadowRadius;
     const cam = this.sun.shadow.camera;
     cam.left = -r;

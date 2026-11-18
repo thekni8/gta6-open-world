@@ -153,6 +153,23 @@ export class Police {
     const wantHeading = Math.atan2(dx, dz);
     const err = angleDiff(car.heading, wantHeading);
     let steer = clamp(err * 2.4, -1, 1);
+    // Look ahead: if a building blocks the nose, steer around the side with
+    // the clearer path instead of ramming the wall.
+    const probeD = 15;
+    const aheadX = car.x + Math.sin(car.heading) * probeD;
+    const aheadZ = car.z + Math.cos(car.heading) * probeD;
+    if (G.city.pointInCollider(aheadX, aheadZ, 2.5)) {
+      const leftX = car.x + Math.sin(car.heading - 0.7) * probeD;
+      const leftZ = car.z + Math.cos(car.heading - 0.7) * probeD;
+      const rightX = car.x + Math.sin(car.heading + 0.7) * probeD;
+      const rightZ = car.z + Math.cos(car.heading + 0.7) * probeD;
+      const leftClear = !G.city.pointInCollider(leftX, leftZ, 2.5);
+      const rightClear = !G.city.pointInCollider(rightX, rightZ, 2.5);
+      if (leftClear && !rightClear) steer = -1;
+      else if (rightClear && !leftClear) steer = 1;
+      else if (leftClear && rightClear) steer = err > 0 ? 1 : -1;
+      else steer = -1; // both blocked: hard turn and the stuck logic backs out
+    }
     // If we are nose-first into a wall, back out and turn around.
     if (car.stuckTimer === undefined) car.stuckTimer = 0;
     if (Math.abs(car.speed) < 1.5 && dist > 8) car.stuckTimer += dt;

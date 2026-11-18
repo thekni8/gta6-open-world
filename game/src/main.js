@@ -25,6 +25,24 @@ import { SeededRandom } from './util/random.js';
 
 const THREE = window.THREE;
 
+// Software renderers (SwiftShader, llvmpipe) rasterize on the CPU: the same
+// scene that flies on a GPU crawls there. Detect them up front and render
+// lighter — smaller backing store, smaller shadow map, no antialiasing.
+// ?shot= keeps full quality (screenshots trade frames for looks);
+// ?fast=1 forces the light path anywhere.
+function detectSoftwareGL() {
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl');
+    if (!gl) return false;
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '';
+    return /swiftshader|llvmpipe|software/i.test(String(name));
+  } catch (_) {
+    return false;
+  }
+}
+
 class Game {
   constructor() {
     const params = new URLSearchParams(window.location.search);
@@ -35,12 +53,19 @@ class Game {
     this.bigMapOpen = false;
     this.cityDistrict = 'Downtown';
     this.menuOrbitAngle = 0;
+    this.quality = {
+      light: params.has('fast') || (detectSoftwareGL() && !params.has('shot')),
+    };
+    this.quality.pixelRatio = this.quality.light ? 0.5 : Math.min(window.devicePixelRatio, 1.5);
+    this.quality.shadowSize = this.quality.light ? 1024 : CFG.shadowMapSize;
 
     // Renderer + scene.
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer = new THREE.WebGLRenderer({ antialias: !this.quality.light });
+    this.renderer.setPixelRatio(this.quality.pixelRatio);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.shadowMap.enabled = true;
+    // Shadows double the fragment work a software renderer must do, so the
+    // light path skips them entirely; the hemisphere light keeps the look.
+    this.renderer.shadowMap.enabled = !this.quality.light;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.getElementById('game-container').appendChild(this.renderer.domElement);
     this.scene = new THREE.Scene();
@@ -126,7 +151,7 @@ class Game {
   spawnParkedCars() {
     const rng = new SeededRandom(this.seed + 99);
     // Kai's own ride outside the safehouse — the one car that is never a crime.
-    const starter = new Car(this, LANDMARKS.safehouse.x + 8, LANDMARKS.safehouse.z + 4, Math.PI / 2, {
+    const starter = new Car(this, LANDMARKS.safehouse.x + 6, LANDMARKS.safehouse.z, 0, {
       driver: 'none', color: 0x1abc9c, kind: 'sedan', owned: true,
     });
     this.parkedCars.push(starter);
@@ -319,6 +344,7 @@ class Game {
     this.state = 'playing';
     this.menus.hideAll();
     this.hud.show();
+    this.save.unlocked = 4; // demo setups may start any mission
     const shot = this.shotMode;
     if (shot === 'chase') {
       const car = new Car(this, -30, -60, Math.PI / 2, {
@@ -335,11 +361,12 @@ class Game {
       this.hud.hideBanner();
       this.hud.showBanner('HEAT RUN', 'Checkpoint 1 — Bayfront. Lose the heat after the third.');
     } else if (shot === 'drive') {
-      const car = new Car(this, -120, 210, Math.PI / 2, {
+      // Beachfront strip: the southernmost road, palms on both sides.
+      const car = new Car(this, -150, 240, Math.PI / 2, {
         driver: 'none', color: 0x2980b9, kind: 'sedan', owned: true,
       });
       this.parkedCars.push(car);
-      this.player.teleport(-120, 210);
+      this.player.teleport(-150, 240);
       this.player.enterCar(car);
       car.speed = 30;
       this.cameraRig.yaw = Math.PI / 2;
@@ -352,28 +379,40 @@ class Game {
       this.hud.hideBanner();
       this.hud.showBanner('PORT AMBUSH', 'Defeat the Vesper gunmen at the port.');
     } else {
-      // foot: Kai on foot downtown among peds and traffic.
-      this.player.teleport(-24, -24);
-      this.player.heading = Math.PI * 0.75;
-      this.cameraRig.yaw = Math.PI * 0.75;
+      // foot: Kai on foot on a downtown sidewalk among peds and traffic.
+      this.player.teleport(-20, -9.5);
+      this.player.heading = Math.PI * 0.6;
+      this.cameraRig.yaw = Math.PI * 0.6;
       this.hud.toast('Downtown Meridian Bay — press J to start a mission.');
     }
     this.cameraRig.snapTo(this.player.inCar || this.player);
   }
 
   frame() {
+    // Fixed-timestep simulation, decoupled from the render rate: the game
+    // advances in 1/30s steps and catches up several steps per rendered
+    // frame, so game time tracks wall time even when a slow renderer only
+    // manages a few frames a second. Rendering stays on the display loop.
     const now = performance.now();
     let dt = (now - this.lastFrame) / 1000;
     this.lastFrame = now;
-    dt = Math.min(dt, 0.05);
-    this.time += dt;
-    if (this.state === 'playing') {
-      this.updatePlaying(dt);
-    } else if (this.state === 'menu') {
-      this.updateMenuCamera(dt);
-      this.city.update(dt, this.time);
+    dt = Math.min(dt, 0.25);
+    this.accumulator = (this.accumulator || 0) + dt;
+    const step = 1 / 30;
+    let steps = 0;
+    while (this.accumulator >= step && steps < 8) {
+      this.time += step;
+      if (this.state === 'playing') {
+        this.updatePlaying(step);
+      } else if (this.state === 'menu') {
+        this.updateMenuCamera(step);
+        this.city.update(step, this.time);
+      }
+      this.fx.update(step);
+      this.accumulator -= step;
+      steps++;
     }
-    this.fx.update(dt);
+    if (steps === 8) this.accumulator = 0; // drop backlog, never spiral
     this.renderer.render(this.scene, this.camera);
     this.input.endFrame();
   }
@@ -421,7 +460,10 @@ class Game {
     const target = player.inCar || player;
     this.cameraRig.update(dt, target, inCar, inCar ? player.inCar.speed01 : 0);
     this.hud.update(dt);
-    this.minimap.update();
+    // The minimap redraws at a third of the frame rate — it is the priciest
+    // 2D work per frame and nobody can see it change at 60fps.
+    this.frameCount = (this.frameCount || 0) + 1;
+    if (this.frameCount % 3 === 0) this.minimap.update();
     if (!inCar) this.audio.setEngine(0, false);
   }
 

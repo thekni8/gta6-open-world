@@ -27,7 +27,7 @@ export const MISSIONS = [
     reward: CFG.missionRewards[0],
     stages: [
       { type: 'goto', label: 'Pick up the crate at Meridian Port', pos: { x: 225, z: 60 }, radius: 10 },
-      { type: 'goto', label: 'Deliver the crate downtown', pos: { x: 30, z: -30 }, radius: 10 },
+      { type: 'goto', label: 'Deliver the crate downtown', pos: { x: 30, z: 0 }, radius: 10 },
     ],
   },
   {
@@ -38,7 +38,7 @@ export const MISSIONS = [
     outro: 'Nice wheels. The Syndicate will want them back. Let them try.',
     reward: CFG.missionRewards[1],
     stages: [
-      { type: 'steal', label: 'Steal the Syndicate coupe downtown', pos: { x: 90, z: 90 }, radius: 6, carColor: 0x8e44ad, carKind: 'sedan' },
+      { type: 'steal', label: 'Steal the Syndicate coupe downtown', pos: { x: 90, z: 60 }, radius: 6, carColor: 0x8e44ad, carKind: 'sedan' },
       { type: 'deliver', label: 'Drive the coupe to the Harbor Kings garage', pos: { x: LANDMARKS.garage.x, z: LANDMARKS.garage.z }, radius: 12 },
     ],
   },
@@ -84,6 +84,6 @@ export const MISSIONS = [
 ];
 
 export const HIDEOUTS = {
-  harbor: { x: 210, z: 210, name: 'Harbor Kings Hideout' },
-  vesper: { x: -210, z: -150, name: 'Vesper Club Hideout' },
+  harbor: { x: 210, z: 240, name: 'Harbor Kings Hideout' },
+  vesper: { x: -210, z: -180, name: 'Vesper Club Hideout' },
 };
