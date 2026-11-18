@@ -194,6 +194,7 @@ class Game {
         }
         return best ? { x: best.pos.x, z: best.pos.z, d: bd } : null;
       },
+      lastShot: () => this.weapons.lastShot,
     };
     window.__ready = false;
 

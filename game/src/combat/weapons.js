@@ -23,6 +23,7 @@ export class Weapons {
     });
     this.onShot = null; // () => {} — sound + scare peds
     this.onHit = null; // (kind, target) => {} — wanted, mission kills
+    this.lastShot = null; // debug: {aim, hit} of the most recent shot
   }
 
   /** Fire the pistol from the camera centre. Returns what was hit, if anything.
@@ -52,9 +53,19 @@ export class Weapons {
     for (const c of ctx.police.cars) worldTargets.push(c.group);
     worldTargets.push(ctx.city.group);
     const worldHits = this.raycaster.intersectObjects(worldTargets, true);
-    const aimPoint = worldHits.length > 0
-      ? worldHits[0].point.clone()
-      : origin.clone().addScaledVector(dir, CONFIG.combat.pistolRange);
+    // The camera sits metres behind Kai, so the ray can strike something
+    // behind him first — his just-exited car, a wall the camera is pressed
+    // against. Such a hit is not the aim point: ignore everything closer
+    // than Kai himself, and take the first hit past him.
+    const pp0 = ctx.playerPos();
+    const camToPlayer = origin.distanceTo(pp0);
+    let aimPoint = origin.clone().addScaledVector(dir, CONFIG.combat.pistolRange);
+    for (const h of worldHits) {
+      if (h.distance > camToPlayer + 0.5) {
+        aimPoint = h.point.clone();
+        break;
+      }
+    }
     // Step 2: the shot, from Kai's chest to the aim point.
     const pp = ctx.playerPos();
     const muzzle = new THREE.Vector3(pp.x, pp.y + 1.4, pp.z);
@@ -76,6 +87,11 @@ export class Weapons {
     }
     this.showTracer(muzzle, end);
     ctx.particles.spark(end.x, end.y, end.z, 6);
+    this.lastShot = {
+      aim: { x: aimPoint.x, y: aimPoint.y, z: aimPoint.z },
+      hit: hit ? hit.kind : null,
+      end: { x: end.x, y: end.y, z: end.z },
+    };
     return hit;
   }
 
