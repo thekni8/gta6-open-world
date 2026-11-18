@@ -37,6 +37,12 @@ class Game {
     this.menuOrbit = 0;
     this.saveTimer = 0;
     this.smokeTimer = 0;
+    // Screenshot staging: ?scene=… presets set sceneName; the game raises
+    // window.__shotReady once the staged action has settled (police closed
+    // in, traffic in frame), so the shot driver captures the peak moment.
+    this.sceneName = null;
+    this.shotTimer = 0;
+    this.exhaustTimer = 0;
 
     const canvas = $('game');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -104,6 +110,7 @@ class Game {
       mission: () => (this.missions.active ? this.missions.active.def.id : null),
       driving: () => !!this.playerCar,
       health: () => this.player.health,
+      shotReady: () => !!window.__shotReady,
       pos: () => ({ x: this.playerPos().x, z: this.playerPos().z }),
       enemies: () => this.enemies.list.length,
       police: () => this.police.cars.length,
@@ -234,6 +241,8 @@ class Game {
     this.police.onRam = () => {
       this.followCam.addShake(0.35);
       this.sound.thud(0.8);
+      const p = this.playerPos();
+      this.particles.spark(p.x, 1, p.z, 14);
     };
     this.wanted.onChange = (stars) => {
       this.sound.setSiren(stars);
@@ -485,7 +494,13 @@ class Game {
   }
 
   // ---- scene presets (screenshots) ------------------------------------------
+  // Every preset stages a busy frame: traffic ahead, pedestrians on the
+  // sidewalk, police already closing in — the same live systems as play.
   applyScene(name) {
+    this.sceneName = name;
+    this.shotTimer = 0;
+    this.chaseBlockerStaged = false;
+    window.__shotReady = false;
     this.newGame();
     const L = this.city.landmarks;
     if (name === 'chase') {
@@ -498,14 +513,38 @@ class Game {
       this.followCam.pitch = 0.3;
       this.autoDrive = true;
       this.player.heading = 0;
+      // Two interceptors start close behind so the frame shows the chase
+      // at once, not an empty road waiting for them to arrive.
+      const pp = this.playerPos();
+      this.police.spawnNear(pp, 16);
+      this.police.spawnNear(pp, 22);
+      // No roadblock while the shot is staging: parked blockers across the
+      // road ahead would stop the getaway dead before the camera fires.
+      this.police.blockTimer = 45;
+      // Traffic to weave through, same direction, up the beachfront road.
+      for (const z of [45, 95]) {
+        const tc = this.traffic.spawnCar({ x: -240, z });
+        tc.heading = 0;
+        tc.cruise = 9;
+      }
+      // Pedestrians scattering on the sidewalk beside the chase.
+      for (let i = 0; i < 4; i++) {
+        this.peds.spawnPed({ x: -228, z: -24 + i * 14 });
+      }
     } else if (name === 'foot') {
       this.player.respawn(9, 60);
       this.player.heading = Math.PI;
       this.followCam.yaw = Math.PI * 0.95;
       this.followCam.pitch = 0.3;
       // A little street life around the player for the shot.
-      for (let i = 0; i < 5; i++) {
-        this.peds.spawnPed({ x: 9 + (i - 2) * 3, z: 48 + i * 5 });
+      for (let i = 0; i < 8; i++) {
+        this.peds.spawnPed({ x: 9 + (i - 4) * 3, z: 48 + i * 5 });
+      }
+      // Cars rolling past on the cross street.
+      for (const x of [-40, 30]) {
+        const tc = this.traffic.spawnCar({ x, z: 60 });
+        tc.heading = Math.PI / 2;
+        tc.cruise = 9;
       }
     } else if (name === 'drive') {
       const car = this.giveCar(0x2e86c1, -240, 120, 0);
@@ -513,6 +552,15 @@ class Game {
       this.followCam.yaw = Math.PI;
       this.followCam.pitch = 0.3;
       this.autoDrive = true;
+      // Traffic ahead on the beachfront strip, sea glinting to the left.
+      for (const z of [205, 255]) {
+        const tc = this.traffic.spawnCar({ x: -240, z });
+        tc.heading = 0;
+        tc.cruise = 10;
+      }
+      for (let i = 0; i < 3; i++) {
+        this.peds.spawnPed({ x: -228, z: 140 + i * 12 });
+      }
     } else if (name === 'mission') {
       this.missions.active = null;
       this.hideMarker();
@@ -521,11 +569,16 @@ class Game {
       this.player.heading = Math.PI / 2;
       this.followCam.yaw = Math.PI * 1.5;
       this.followCam.pitch = 0.3;
-      // One gunman stands dead ahead on the camera axis, in the crosshair.
+      // Gunmen stand on the camera axis, in the crosshair.
       const first = this.enemies.list[0];
       if (first) {
         first.pos.set(this.player.pos.x + 16, 0, this.player.pos.z);
         first.mesh.position.copy(first.pos);
+      }
+      const second = this.enemies.list[1];
+      if (second) {
+        second.pos.set(this.player.pos.x + 20, 0, this.player.pos.z + 7);
+        second.mesh.position.copy(second.pos);
       }
     }
     this.setMode('playing');
@@ -589,8 +642,18 @@ class Game {
     // --- movement
     if (this.playerCar) {
       const car = this.playerCar;
+      // Auto-drive (screenshot presets): steer back toward the centre line
+      // of the road the car is on, with only a gentle weave — the old fixed
+      // sine wave wandered the car onto the sidewalk and into pedestrians.
+      const laneSteer = (() => {
+        const road = this.city.nearestRoad(car.pos.x, car.pos.z);
+        const rx = Math.cos(car.heading);
+        const rz = -Math.sin(car.heading);
+        const lateral = (car.pos.x - road.x) * rx + (car.pos.z - road.z) * rz;
+        return Math.max(-0.35, Math.min(0.35, -lateral * 0.08)) + Math.sin(performance.now() / 2600) * 0.06;
+      })();
       const driveInput = this.autoDrive
-        ? { throttle: true, brake: false, steer: Math.sin(performance.now() / 2600) * 0.25, handbrake: false }
+        ? { throttle: true, brake: false, steer: laneSteer, handbrake: false }
         : {
             throttle: axis.y > 0,
             brake: axis.y < 0,
@@ -608,6 +671,15 @@ class Game {
       if (car.smoking && this.smokeTimer <= 0) {
         this.smokeTimer = 0.12;
         this.particles.smoke(car.pos.x, 1.2, car.pos.z);
+      }
+      // Exhaust puffs while speeding — the chase reads as motion, not a still.
+      this.exhaustTimer -= dt;
+      if (Math.abs(speed) > 12 && this.exhaustTimer <= 0) {
+        this.exhaustTimer = 0.09;
+        this.particles.exhaust(
+          car.pos.x - Math.sin(car.heading) * 2.2, 0.5,
+          car.pos.z - Math.cos(car.heading) * 2.2,
+        );
       }
       // Collisions with traffic cars.
       for (const other of [...this.traffic.cars]) {
@@ -712,6 +784,22 @@ class Game {
     if (this.saveTimer > 30) {
       this.saveTimer = 0;
       this.saveGame();
+    }
+
+    // Screenshot staging: once the preset has run a couple of seconds, the
+    // chase has closed in and the frame is at its busiest — signal the shot
+    // driver. (Headless renderers run game time far slower than wall time,
+    // so the threshold is short on purpose.)
+    if (this.sceneName && !window.__shotReady) {
+      this.shotTimer += dt;
+      // Chase cover: drop the roadblock across the road ahead a moment
+      // before the shot, so the frame catches the getaway reaching it —
+      // interceptors behind on the minimap, blockers ahead in the frame.
+      if (this.sceneName === 'chase' && !this.chaseBlockerStaged && this.shotTimer > 1.8) {
+        this.chaseBlockerStaged = true;
+        this.police.roadblock(this.playerPos(), this.playerCar ? this.playerCar.heading : 0);
+      }
+      if (this.shotTimer > 2.5) window.__shotReady = true;
     }
 
     this.renderer.render(this.scene, this.camera);

@@ -103,19 +103,27 @@ export class Police {
   update(dt, stars, playerPos, playerHeading, playerCar, onPlayerHit) {
     this.flashTimer += dt;
     const flash = Math.floor(this.flashTimer * 6) % 2 === 0;
-    // Match the fleet to the wanted level.
+    // Match the fleet to the wanted level. Roadblock cars are parked, not
+    // chasers: they never count toward the fleet size and are never trimmed
+    // for it, or a fresh roadblock would evict its own chasers (or itself).
     const want = this.desiredCount(stars);
-    while (this.cars.length < want) this.spawnNear(playerPos);
-    while (this.cars.length > want) {
-      // Drop the farthest car first.
+    const chasers = this.cars.filter((c) => !c.blocker);
+    while (chasers.length < want) {
+      const spawned = this.spawnNear(playerPos);
+      if (!spawned) break;
+      chasers.push(spawned);
+    }
+    while (chasers.length > want) {
+      // Drop the farthest chaser first.
       let far = 0;
       let fd = -1;
-      this.cars.forEach((c, i) => {
+      chasers.forEach((c, i) => {
         const d = Math.hypot(c.pos.x - playerPos.x, c.pos.z - playerPos.z);
         if (d > fd) { fd = d; far = i; }
       });
-      this.cars[far].remove();
-      this.cars.splice(far, 1);
+      const dropped = chasers.splice(far, 1)[0];
+      dropped.remove();
+      this.cars.splice(this.cars.indexOf(dropped), 1);
     }
     // Roadblocks at 3+ stars, at most once every 25 s.
     this.blockTimer = (this.blockTimer ?? 0) - dt;

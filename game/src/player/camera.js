@@ -36,11 +36,11 @@ export class FollowCamera {
       d = ((d + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
       this.yaw += d * Math.min(1, dt * 1.6);
     }
-    const dist = driving ? 12 : 8;
+    const dist = driving ? 10 : 8;
     this.distance += (dist - this.distance) * Math.min(1, dt * 3);
     // Low on-foot camera: just above the shoulder line, so the aim ray
     // stays near chest height out to 40 m.
-    const height = driving ? 4.6 : 1.3 + Math.sin(this.pitch) * this.distance * 0.5;
+    const height = driving ? 3.8 : 1.3 + Math.sin(this.pitch) * this.distance * 0.5;
     const cx = pos.x + Math.sin(this.yaw) * Math.cos(this.pitch) * this.distance;
     const cz = pos.z + Math.cos(this.yaw) * Math.cos(this.pitch) * this.distance;
     const cy = pos.y + height + (driving ? Math.sin(this.pitch) * this.distance : 0);

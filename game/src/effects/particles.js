@@ -13,7 +13,7 @@ export class Particles {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX_PARTICLES * 3), 3));
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MAX_PARTICLES * 3), 3));
-    const mat = new THREE.PointsMaterial({ size: 0.35, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false });
+    const mat = new THREE.PointsMaterial({ size: 0.15, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false });
     this.points = new THREE.Points(geo, mat);
     this.points.frustumCulled = false;
     scene.add(this.points);
@@ -39,12 +39,18 @@ export class Particles {
     }
   }
 
-  spark(x, y, z, count = 8) {
-    this.emit(x, y, z, count, { r: 1, g: 0.85, b: 0.4 }, 5, 3, 0.4, -9);
+  spark(x, y, z, count = 14) {
+    this.emit(x, y, z, count, { r: 1, g: 0.85, b: 0.4 }, 6, 3, 0.5, -9);
   }
 
   smoke(x, y, z) {
     this.emit(x, y, z, 2, { r: 0.25, g: 0.25, b: 0.25 }, 0.8, 1.6, 1.4, 1.5);
+  }
+
+  /** Exhaust puff from a speeding car: faint, fast-fading, drifts up.
+   *  Kept dark so it reads as smoke on the asphalt, never as a pale chip. */
+  exhaust(x, y, z) {
+    this.emit(x, y, z, 1, { r: 0.22, g: 0.22, b: 0.24 }, 0.5, 1.2, 0.7, 2.0);
   }
 
   blood(x, y, z) {

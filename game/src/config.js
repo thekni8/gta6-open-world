@@ -33,9 +33,9 @@ export const CONFIG = {
     damagePerHit: 8,
   },
   traffic: {
-    count: 16,
+    count: 22,
     speed: 9,
-    pedCount: 26,
+    pedCount: 36,
     pedSpeed: 1.6,
   },
   police: {
@@ -70,11 +70,11 @@ export const CONFIG = {
   missions: {
     reward: [400, 600, 900, 1200, 2500],
   },
-  // Sun-soaked late afternoon palette.
+  // Golden-hour palette: warm low sun, peach haze, teal sea.
   palette: {
-    sky: 0x8ec9e8,
-    fog: 0xa8c8d8,
-    sun: 0xffe0b3,
+    sky: 0x7fb8e2,
+    fog: 0xe8c9a8,
+    sun: 0xffb066,
     road: 0x3a3f46,
     roadLine: 0xd8c86a,
     sidewalk: 0x9aa0a3,

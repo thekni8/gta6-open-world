@@ -16,6 +16,9 @@
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+// v2 (iteration #2): golden-hour lighting, denser city and traffic, closer
+// driving camera, bolder HUD/minimap, and staged ?scene= presets that raise
+// window.__shotReady once the action has settled for screenshots.
 
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

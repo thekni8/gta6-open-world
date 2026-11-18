@@ -66,29 +66,29 @@ export class Minimap {
         g.stroke();
       }
     }
-    // Traffic dots.
+    // Traffic dots — bigger, so the minimap reads at a glance.
     g.fillStyle = '#e8e8e8';
     for (const c of s.traffic) {
       const [tx, ty] = this.worldToMap(c.x, c.z);
-      g.fillRect(tx - 1.5, ty - 1.5, 3, 3);
+      g.fillRect(tx - 2, ty - 2, 4, 4);
     }
-    // Police dots, flashing red/blue.
+    // Police dots, flashing red/blue, larger than traffic.
     const flashRed = Math.floor(performance.now() / 250) % 2 === 0;
     g.fillStyle = flashRed ? '#ff3030' : '#3060ff';
     for (const c of s.police) {
       const [px, py] = this.worldToMap(c.x, c.z);
-      g.beginPath(); g.arc(px, py, 3, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(px, py, 4.5, 0, Math.PI * 2); g.fill();
     }
-    // Player arrow.
+    // Player arrow — bigger and outlined, the anchor of the map.
     const [px, py] = this.worldToMap(s.player.x, s.player.z);
     g.save();
     g.translate(px, py);
     g.rotate(s.playerHeading);
     g.fillStyle = '#ffffff';
     g.strokeStyle = '#111';
-    g.lineWidth = 1;
+    g.lineWidth = 1.5;
     g.beginPath();
-    g.moveTo(0, -7); g.lineTo(5, 6); g.lineTo(0, 3); g.lineTo(-5, 6);
+    g.moveTo(0, -10); g.lineTo(7, 8); g.lineTo(0, 4); g.lineTo(-7, 8);
     g.closePath(); g.fill(); g.stroke();
     g.restore();
     // North tick.

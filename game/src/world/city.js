@@ -129,6 +129,19 @@ export function buildCity(scene, rng) {
     const roof = box(w + 0.4, 0.5, d + 0.4, roofMat);
     roof.position.set(cx, h + 0.25, cz);
     group.add(roof);
+    // Rooftop clutter: AC boxes on low roofs, a mast antenna on towers.
+    if (h < 30) {
+      const ac = box(2.2, 1.0, 2.2, new THREE.MeshLambertMaterial({ color: 0x8a9096 }));
+      ac.position.set(cx + w / 4, h + 1.0, cz - d / 4);
+      group.add(ac);
+    } else {
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 9, 6), lampMat);
+      mast.position.set(cx, h + 4.5, cz);
+      group.add(mast);
+      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff4040 }));
+      tip.position.set(cx, h + 9.2, cz);
+      group.add(tip);
+    }
     buildings.push({ minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2, h });
     return m;
   }
@@ -188,7 +201,7 @@ export function buildCity(scene, rng) {
         // A low annex beside the tower.
         addBuilding(cx + 14, cz - 12, 12, range(rng, 8, 14), 12, pick(rng, facadeMats));
       } else {
-        const n = int(rng, 2, 3);
+        const n = int(rng, 3, 4);
         const spots = shuffle(rng, [
           [-11, -11], [11, -11], [-11, 11], [11, 11], [0, -11], [0, 11],
         ]).slice(0, n);
@@ -198,6 +211,15 @@ export function buildCity(scene, rng) {
           addBuilding(cx + ox, cz + oz, w, range(rng, 8, 26), d, pick(rng, facadeMats));
         }
       }
+    }
+  }
+
+  // ---- street trees along the sidewalks, so the roads feel lived-in
+  for (const c of roadCoords) {
+    for (let t = -240; t <= 240; t += 120) {
+      if (Math.abs(t) < 30) continue; // keep intersections clear
+      addTree(c + 10.5, t + 30);
+      addTree(t + 30, c - 10.5);
     }
   }
 
@@ -224,7 +246,7 @@ export function buildCity(scene, rng) {
     group.add(pier);
   }
   const hullMat = new THREE.MeshLambertMaterial({ color: 0xf0ead8 });
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 8; i++) {
     const hull = box(3.2, 1.4, 9, hullMat);
     hull.position.set(-292 - (i % 2) * 8, 0.7, 86 + i * 20);
     group.add(hull);
@@ -236,7 +258,7 @@ export function buildCity(scene, rng) {
   // ---- port: container stacks and a gantry crane on the east edge
   const port = { x: 262, z: -60 };
   const containerColors = [0xc0392b, 0x2e86c1, 0x27ae60, 0xe67e22, 0x8e44ad];
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 18; i++) {
     const px = 256 + (i % 4) * 9;
     const pz = -110 + Math.floor(i / 4) * 26 + range(rng, -3, 3);
     const stack = int(rng, 1, 3);
@@ -260,8 +282,8 @@ export function buildCity(scene, rng) {
   buildings.push({ minX: 256, maxX: 260, minZ: port.z - 15, maxZ: port.z + 15, h: 26 });
 
   // ---- beach palms
-  for (let i = 0; i < 10; i++) {
-    addTree(C.beachX - 2 + range(rng, -2, 2), -260 + i * 55 + range(rng, -8, 8));
+  for (let i = 0; i < 16; i++) {
+    addTree(C.beachX - 2 + range(rng, -2, 2), -260 + i * 34 + range(rng, -8, 8));
   }
 
   const city = {
