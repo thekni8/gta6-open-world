@@ -11,7 +11,7 @@ export class Hud {
       'ammo-value', 'controls-hint', 'zone-label', 'toast', 'toast-title',
       'toast-body', 'crosshair', 'damage-flash', 'mission-overlay',
       'mission-overlay-title', 'mission-overlay-body', 'mission-overlay-btn',
-      'busted-overlay', 'wasted-overlay',
+      'busted-overlay', 'wasted-overlay', 'interact-prompt', 'hit-layer',
     ]) {
       this.el[id] = document.getElementById(id);
     }
@@ -31,6 +31,27 @@ export class Hud {
     this.el['toast-body'].textContent = body;
     this.el.toast.classList.add('visible');
     this.toastTimer = seconds;
+  }
+
+  hideToast() {
+    this.toastTimer = 0;
+    this.el.toast.classList.remove('visible');
+  }
+
+  // Floating "-34" damage number near the crosshair.
+  showDamageNumber(amount) {
+    const layer = this.el['hit-layer'];
+    if (!layer) return;
+    const div = document.createElement('div');
+    div.className = 'hit-number';
+    div.textContent = `-${amount}`;
+    const ox = (Math.random() - 0.5) * 90;
+    const oy = (Math.random() - 0.5) * 50 - 30;
+    div.style.left = `calc(50% + ${ox}px)`;
+    div.style.top = `calc(50% + ${oy}px)`;
+    layer.appendChild(div);
+    requestAnimationFrame(() => div.classList.add('fly'));
+    setTimeout(() => div.remove(), 900);
   }
 
   showZone(name) {
@@ -141,6 +162,16 @@ export class Hud {
     }
     // Crosshair only on foot while playing.
     this.el.crosshair.style.display = (!player.inCar && game.state === 'playing') ? 'block' : 'none';
+    // Interaction prompt: [E] Enter car when a car is in reach on foot.
+    const prompt = this.el['interact-prompt'];
+    if (prompt) {
+      const nearCar = !player.inCar && game.state === 'playing' && (
+        game.traffic.nearestParked(player.pos.x, player.pos.z, 4.5)
+        || game.traffic.nearestMoving(player.pos.x, player.pos.z, 4.5)
+        || game.police.nearestCar(player.pos.x, player.pos.z, 4.5)
+      );
+      prompt.style.display = nearCar ? 'flex' : 'none';
+    }
     // Zone label on district change.
     const zone = game.currentZone();
     this.showZone(zone);

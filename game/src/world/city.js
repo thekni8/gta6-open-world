@@ -133,6 +133,22 @@ export function buildCity(scene, seed = 7) {
   }
 
   // ---- buildings (one instanced mesh + rooftop boxes) ----
+  // Window grid texture: flat pastel slabs become real buildings.
+  const windowTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = 128;
+    c.height = 256;
+    const g = c.getContext('2d');
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, 128, 256);
+    g.fillStyle = '#54687c';
+    for (let y = 10; y < 246; y += 16) {
+      for (let x = 8; x < 120; x += 16) g.fillRect(x, y, 9, 10);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  })();
   const buildingSpots = [];
   for (const cx of blockCenters) {
     for (const cz of blockCenters) {
@@ -164,7 +180,7 @@ export function buildCity(scene, seed = 7) {
   {
     const geo = new THREE.BoxGeometry(1, 1, 1);
     geo.translate(0, 0.5, 0);
-    const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0 });
+    const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0, map: windowTex });
     const inst = new THREE.InstancedMesh(geo, mat, buildingSpots.length);
     const m4 = new THREE.Matrix4();
     const color = new THREE.Color();
@@ -229,13 +245,27 @@ export function buildCity(scene, seed = 7) {
   }
   addLamps(scene, lampSpots);
 
+  // ---- port + marina paving: grey concrete dock, not green lawn ----
+  const dockMat = new THREE.MeshStandardMaterial({ color: 0x9a9a92, roughness: 1 });
+  const dock = new THREE.Mesh(new THREE.PlaneGeometry(44, 224), dockMat);
+  dock.rotation.x = -Math.PI / 2;
+  dock.position.set(-218, 0.015, 84);
+  dock.receiveShadow = true;
+  scene.add(dock);
+  const marinaMat = new THREE.MeshStandardMaterial({ color: 0xb0a890, roughness: 1 });
+  const marinaSlab = new THREE.Mesh(new THREE.PlaneGeometry(44, 280), marinaMat);
+  marinaSlab.rotation.x = -Math.PI / 2;
+  marinaSlab.position.set(218, 0.015, 56);
+  marinaSlab.receiveShadow = true;
+  scene.add(marinaSlab);
+
   // ---- port: container stacks + cranes (west strip) ----
   const containerColors = [0xd94f3d, 0x3d7dd9, 0x3da35d, 0xe8a33d, 0x8a5fc0, 0xd97b3d];
   const containerSpots = [];
   for (let x = -234; x <= -206; x += 13) {
     for (let z = -20; z <= 180; z += 16) {
-      if (rng.chance(0.75)) {
-        const stack = rng.int(1, 2);
+      if (rng.chance(0.85)) {
+        const stack = rng.chance(0.6) ? 2 : 1; // mostly double-stacked
         for (let s = 0; s < stack; s++) {
           containerSpots.push({ x: x + rng.range(-1, 1), z: z + rng.range(-1, 1), y: s * 2.7, color: rng.pick(containerColors), rot: rng.chance(0.5) ? 0 : Math.PI / 2 });
         }

@@ -1,6 +1,6 @@
 // localStorage save/load: mission progress, cash, and where the player
 // was standing. Small, versioned, and tolerant of corrupt data.
-import { CONFIG } from './config.js';
+import { CONFIG } from '../config.js';
 
 export function defaultSave() {
   return {

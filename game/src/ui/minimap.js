@@ -26,8 +26,8 @@ export class Minimap {
   _renderStatic() {
     const ctx = this.staticLayer.getContext('2d');
     const s = this.size / (CONFIG.world.half * 2);
-    // Land: bright fresh green, so the map reads at a glance.
-    ctx.fillStyle = '#7cc45e';
+    // Land: muted olive green — dark enough that blips pop, bright enough to read.
+    ctx.fillStyle = '#69a854';
     ctx.fillRect(0, 0, this.size, this.size);
     // Sea along the south edge.
     ctx.fillStyle = '#2fa8c9';
@@ -37,14 +37,14 @@ export class Minimap {
     const [, beachY] = this._toMap(0, 196);
     ctx.fillRect(0, beachY, this.size, this._toMap(0, 240)[1] - beachY);
     // Park: deeper green block.
-    ctx.fillStyle = '#4da34d';
+    ctx.fillStyle = '#3f8f3f';
     const [px, py] = this._toMap(28, 84);
     ctx.fillRect(px, py, (140 - 28) * s, (168 - 84) * s);
     // Port strip: industrial grey-beige.
     ctx.fillStyle = '#b8a888';
     ctx.fillRect(0, this._toMap(0, -28)[1], ( -168 + 240) * s, (196 + 28) * s);
-    // Blocks: pale sidewalk slabs between roads.
-    ctx.fillStyle = '#d9d2bd';
+    // Blocks: muted sidewalk slabs between roads.
+    ctx.fillStyle = '#cfc7a3';
     const lines = CONFIG.world.roadLines;
     const edges = [-240, ...lines.map((l) => l - 6)];
     const edges2 = [...lines.map((l) => l + 6), 240];
@@ -96,11 +96,26 @@ export class Minimap {
     ctx.drawImage(this.staticLayer, 0, 0);
     const player = game.player;
 
-    // Traffic dots.
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    // Traffic dots: dark slate squares with a white rim — visible on pale streets.
     for (const c of game.traffic.cars) {
       const [x, y] = this._toMap(c.pos.x, c.pos.z);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x - 2.5, y - 2.5, 5, 5);
+      ctx.fillStyle = '#33383e';
       ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+    }
+    // Pedestrian dots: small white dots with a dark rim — the map teems.
+    for (const p of game.peds.peds) {
+      if (p.state === 'down' || p.isEnemy) continue;
+      const [x, y] = this._toMap(p.pos.x, p.pos.z);
+      ctx.fillStyle = '#33383e';
+      ctx.beginPath();
+      ctx.arc(x, y, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y, 1.4, 0, Math.PI * 2);
+      ctx.fill();
     }
     // Enemy dots.
     ctx.fillStyle = '#ff2222';
@@ -126,7 +141,7 @@ export class Minimap {
     const target = this._objectiveTarget(game, step);
     if (target) {
       const [x, y] = this._toMap(target.x, target.z);
-      const r = 7 + Math.sin(t * 5) * 1.5;
+      const r = 9 + Math.sin(t * 5) * 1.5;
       ctx.fillStyle = '#ffd23d';
       ctx.strokeStyle = '#7a5200';
       ctx.lineWidth = 2;

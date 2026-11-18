@@ -53,6 +53,14 @@ export class MissionManager {
     return true;
   }
 
+  // Jump to a later step (used by screenshot staging and mission restarts).
+  jumpToStep(index) {
+    if (!this.active) return;
+    this.active.stepIndex = Math.min(index, this.active.def.steps.length - 1);
+    this.active.kills = 0;
+    this._enterStep();
+  }
+
   _enterStep() {
     const game = this.game;
     const step = this.currentStep();

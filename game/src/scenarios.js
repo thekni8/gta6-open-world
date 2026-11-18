@@ -2,6 +2,10 @@
 // scene — an active mission with a countdown, traffic and pedestrians in
 // frame, police close in the chase shot — then the camera is placed for it.
 // Every shot shows the full HUD: big minimap, stars, objective + timer.
+// Staging follows the Argon vet: angled cameras (never a straight vanishing
+// point), a physical police blockade for the cover, close pedestrians on
+// foot, downtown — not the beach twice — for the drive shot, and a
+// mid-firefight port with a wounded gunman.
 import { Car, randomCarColor } from './vehicles/cars.js';
 
 export function scenarioFromUrl() {
@@ -16,77 +20,121 @@ function givePlayerCar(game, x, z, angle, color = 0x118ab2) {
   return car;
 }
 
-function addTrafficOnRoad(game, roadZ, xs, angle) {
-  for (const x of xs) {
-    const car = new Car(game.scene, {
-      x, z: roadZ + (Math.random() < 0.5 ? -3 : 3),
-      angle,
-      color: randomCarColor(game.rng),
-      kind: 'sedan',
-    });
+function addTrafficOnRoad(game, line, positions, angle, horizontal = true) {
+  for (const t of positions) {
+    const x = horizontal ? t : line + (Math.random() < 0.5 ? -3 : 3);
+    const z = horizontal ? line + (Math.random() < 0.5 ? -3 : 3) : t;
+    const car = new Car(game.scene, { x, z, angle, color: randomCarColor(game.rng), kind: 'sedan' });
     car.driver = 'traffic';
-    car.route = { horizontal: true, line: roadZ, dir: angle < 0 ? 1 : -1, targetSpeed: 11 };
+    car.route = { horizontal, line, dir: 1, targetSpeed: 11 };
     car.speed = 9;
     game.traffic.cars.push(car);
   }
 }
 
-function addPedsNear(game, cx, cz, count) {
+function addPedsNear(game, cx, cz, count, spread = 40) {
   for (let i = 0; i < count; i++) {
-    const x = cx + (Math.random() - 0.5) * 46;
-    const z = cz + (Math.random() - 0.5) * 36;
+    const x = cx + (Math.random() - 0.5) * spread;
+    const z = cz + (Math.random() - 0.5) * spread * 0.7;
     const ped = game.peds._makePed(x, z);
     game.peds.peds.push(ped);
   }
 }
 
+function addPedAt(game, x, z) {
+  const ped = game.peds._makePed(x, z);
+  game.peds.peds.push(ped);
+  return ped;
+}
+
+function parkCar(game, x, z, angle, color) {
+  const car = new Car(game.scene, { x, z, angle, color, kind: 'sedan' });
+  car.driver = null;
+  game.traffic.parked.push(car);
+  return car;
+}
+
 export function applyScenario(game, name) {
   const player = game.player;
   if (name === 'cover') {
-    // Police chase on the beachfront avenue: wanted 3, mission live,
-    // cruisers flanking and a roadblock ahead, traffic and peds in frame.
+    // Coastal intersection blockade: wanted 3, mission live, one cruiser
+    // T-boned 45° across the player's fender, a second cruiser behind,
+    // a roadblock ahead, cross-traffic, peds on the boardwalk. Camera
+    // yawed ~25° off the road axis — never a straight vanishing point.
     game.missions.startMission(2); // Heat Run — wanted 3 + timer
-    givePlayerCar(game, -52, 168, -Math.PI / 2, 0x118ab2);
-    player.car.speed = 24;
-    game.police.spawnCruiser(game, -66, 162); // flanking behind-left
-    game.police.spawnCruiser(game, -44, 174); // flanking right
-    game.police.spawnCruiser(game, -78, 168); // chasing behind
-    for (const c of game.police.cars) { c.speed = 22; c.angle = -Math.PI / 2; }
-    game.police.spawnRoadblock(game); // ahead on the avenue
-    addTrafficOnRoad(game, 168, [-20, 8, 30, -95], -Math.PI / 2);
-    addPedsNear(game, -40, 180, 8);
-    game.cameraRig.setView(Math.PI / 2 + 0.25, 0.5, 13);
+    game.hud.hideToast();
+    givePlayerCar(game, -88, 196, -Math.PI / 2, 0x118ab2);
+    player.car.speed = 5;
+    // T-bone cruiser: diagonal across the player's front fender.
+    const ram = game.police.spawnCruiser(game, -80, 193.5);
+    ram.angle = -Math.PI / 4;
+    ram.group.rotation.y = ram.angle;
+    ram.speed = 0;
+    // Second cruiser tight behind the player.
+    const tail = game.police.spawnCruiser(game, -98, 196);
+    tail.angle = -Math.PI / 2;
+    tail.group.rotation.y = tail.angle;
+    tail.speed = 4;
+    // Roadblock across the avenue ahead.
+    for (const z of [192.6, 199.4]) {
+      const block = new Car(game.scene, { x: -58, z, angle: Math.PI / 2, color: 0x1a3a5c, kind: 'police' });
+      block.driver = 'police-block';
+      game.police.roadblockCars.push(block);
+    }
+    addTrafficOnRoad(game, 196, [-30, -10, 18, -130], -Math.PI / 2, true);
+    addTrafficOnRoad(game, -84, [150, 120, 96], 0, false); // cross-traffic, northbound
+    addTrafficOnRoad(game, -84, [176, 140], Math.PI, false); // cross-traffic, southbound
+    addPedsNear(game, -84, 212, 7, 36); // boardwalk peds
+    game.cameraRig.setView(-0.85, 0.5, 18);
     game.cameraRig.firstFrame = true;
   } else if (name === 'foot') {
-    // On foot downtown: mission live, peds and traffic all around.
+    // On foot downtown: mission live, pedestrians close to the camera,
+    // a parked car beside the player so the [E] prompt shows, towers ahead.
     game.missions.startMission(0); // First Delivery — timer running
-    player.pos.set(-6, 0, 30);
-    player.angle = Math.PI * 0.85;
-    addPedsNear(game, 0, 28, 12);
-    addTrafficOnRoad(game, 28, [-40, -12, 24, 52], -Math.PI / 2);
-    addTrafficOnRoad(game, -28, [-30, 10, 44], Math.PI / 2);
-    game.cameraRig.setView(Math.PI * 0.9, 0.5, 10);
+    game.hud.hideToast();
+    player.pos.set(4, 0, 36);
+    player.angle = Math.PI;
+    parkCar(game, 7, 33, Math.PI / 2, 0x3da35d);
+    addPedAt(game, 0, 33);
+    addPedAt(game, 9, 39);
+    addPedAt(game, -2, 41);
+    addPedAt(game, 11, 35);
+    addPedAt(game, 2, 44);
+    addPedsNear(game, 0, 28, 6, 44);
+    addTrafficOnRoad(game, 28, [-40, -12, 24, 52], -Math.PI / 2, true);
+    addTrafficOnRoad(game, -28, [-30, 10, 44], Math.PI / 2, true);
+    addTrafficOnRoad(game, 28, [-8, 60], 0, false);
+    game.cameraRig.setView(Math.PI, 0.55, 10);
     game.cameraRig.firstFrame = true;
   } else if (name === 'drive') {
-    // Speeding along the beachfront strip: palms, sea, mission + timer.
-    game.missions.startMission(1); // Borrowed Wheels — timer running
-    givePlayerCar(game, -70, 168, -Math.PI / 2, 0xd94f3d);
+    // Downtown avenue, not the beach again: speeding past towers with
+    // cross-traffic and the marina beacon glowing ahead, mission + timer.
+    game.missions.startMission(0); // First Delivery
+    game.missions.jumpToStep(1); // deliver leg — beacon at the marina
+    game.hud.hideToast();
+    givePlayerCar(game, -60, 28, -Math.PI / 2, 0xd94f3d);
     player.car.speed = 27;
-    addTrafficOnRoad(game, 168, [-30, 5, 40, -105, 70], -Math.PI / 2);
-    addPedsNear(game, -50, 185, 8);
-    game.cameraRig.setView(Math.PI / 2 + 0.15, 0.42, 13);
+    addTrafficOnRoad(game, 28, [-20, 8, 40, -100, 70], -Math.PI / 2, true);
+    addTrafficOnRoad(game, -28, [-40, 30], Math.PI / 2, true);
+    addTrafficOnRoad(game, -28, [-10, 70], 0, false);
+    addTrafficOnRoad(game, 28, [0, 64], Math.PI, false);
+    addPedsNear(game, -40, 36, 8, 48);
+    addPedsNear(game, 20, 20, 6, 40);
+    game.cameraRig.setView(Math.PI / 2 + 0.22, 0.45, 13);
     game.cameraRig.firstFrame = true;
   } else if (name === 'mission') {
-    // Port Ambush shootout: gunmen with health bars, crates and cranes.
+    // Port Ambush mid-firefight: gunmen with health bars among double-
+    // stacked containers and a yellow crane, the beacon in frame, one
+    // gunman already wounded to 40% — the shot script fires the pistol
+    // just before capture for a muzzle flash + tracer.
     game.missions.startMission(3);
-    // Jump straight to the shootout step.
-    game.missions.active.stepIndex = 1;
-    game.missions._enterStep();
-    player.pos.set(-206, 0, 74);
-    player.angle = Math.PI * 1.25;
-    // One gunman close and visible, mid-frame.
-    game.weapons.spawnEnemy(game, -214, 62);
-    game.cameraRig.setView(Math.PI * 1.2, 0.45, 9);
+    game.missions.jumpToStep(1); // the shootout
+    game.hud.hideToast();
+    player.pos.set(-208, 0, 70);
+    player.angle = -2.36; // facing the gunman by the crane
+    const wounded = game.weapons.spawnEnemy(game, -212, 66);
+    wounded.health = 40;
+    game.cameraRig.setView(0.7, 0.5, 10);
     game.cameraRig.firstFrame = true;
   }
 }

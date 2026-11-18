@@ -22,7 +22,8 @@ export function makeCarMesh(color, kind = 'sedan') {
   sharedGeos();
   const group = new THREE.Group();
   const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.35 });
-  const glass = new THREE.MeshStandardMaterial({ color: 0x1a2836, roughness: 0.15, metalness: 0.6 });
+  // Slate blue-grey cabins: shaded glass, never a black hole.
+  const glass = new THREE.MeshStandardMaterial({ color: 0x4a607a, roughness: 0.15, metalness: 0.6 });
   const tyre = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.95 });
 
   const body = new THREE.Mesh(bodyGeo, paint);
@@ -71,6 +72,8 @@ export function makeCarMesh(color, kind = 'sedan') {
   }
 
   let lightBar = null;
+  let glowRed = null;
+  let glowBlue = null;
   if (kind === 'police') {
     lightBar = new THREE.Group();
     const red = new THREE.Mesh(
@@ -90,9 +93,18 @@ export function makeCarMesh(color, kind = 'sedan') {
     const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.94, 0.3, 2.2), new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.4 }));
     stripe.position.set(0, 0.68, 0.1);
     group.add(stripe);
+    // Flashing light glow pools on the asphalt under the cruiser.
+    const glowGeo = new THREE.CircleGeometry(3.4, 20);
+    glowRed = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.22, depthWrite: false }));
+    glowRed.rotation.x = -Math.PI / 2;
+    glowRed.position.set(-1.2, 0.08, 0);
+    glowBlue = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({ color: 0x2266ff, transparent: true, opacity: 0.22, depthWrite: false }));
+    glowBlue.rotation.x = -Math.PI / 2;
+    glowBlue.position.set(1.2, 0.08, 0);
+    group.add(glowRed, glowBlue);
   }
 
-  return { group, wheels, lightBar };
+  return { group, wheels, lightBar, glowRed, glowBlue };
 }
 
 export function randomCarColor(rng) {
@@ -106,10 +118,12 @@ export class Car {
     this.scene = scene;
     this.kind = kind;
     this.color = color;
-    const { group, wheels, lightBar } = makeCarMesh(color, kind);
+    const { group, wheels, lightBar, glowRed, glowBlue } = makeCarMesh(color, kind);
     this.group = group;
     this.wheels = wheels;
     this.lightBar = lightBar;
+    this.glowRed = glowRed;
+    this.glowBlue = glowBlue;
     this.group.position.set(x, 0, z);
     this.group.rotation.y = angle;
     scene.add(group);
@@ -183,6 +197,8 @@ export class Car {
     const on = Math.sin(t * 14) > 0;
     this.lightBar.children[0].material.emissiveIntensity = on ? 2.4 : 0.15;
     this.lightBar.children[1].material.emissiveIntensity = on ? 0.15 : 2.4;
+    if (this.glowRed) this.glowRed.material.opacity = on ? 0.3 : 0.05;
+    if (this.glowBlue) this.glowBlue.material.opacity = on ? 0.05 : 0.3;
   }
 
   speedKmh() {

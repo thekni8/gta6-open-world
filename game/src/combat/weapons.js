@@ -124,6 +124,7 @@ export class Weapons {
     this._spawnTracer(muzzle, hitPoint);
     if (hitPed) {
       game.particles.blood(hitPed.pos.x, 1.3, hitPed.pos.z);
+      game.hud.showDamageNumber(CONFIG.player.pistolDamage);
       const wentDown = game.peds.hit(hitPed, CONFIG.player.pistolDamage, game);
       if (!hitPed.isEnemy) {
         game.wanted.commit(wentDown ? 'killPedestrian' : 'shootWitnessed', game);
