@@ -162,6 +162,13 @@ class Game {
       setHealth: (n) => {
         this.player.health = n;
       },
+      setAutoDrive: (on) => {
+        this.autoDrive = on;
+      },
+      missionCarPos: () => {
+        const c = this.missionCar;
+        return c ? { x: c.pos.x, z: c.pos.z } : null;
+      },
     };
     window.__ready = false;
 
