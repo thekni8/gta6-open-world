@@ -55,10 +55,21 @@
     MB.Peds.fleeFrom(m.x, m.z, 30);
     if (MB.S.wanted > 0 || MB.W.cops.length > 0) MB.Wanted.addCrime('shoot');
 
-    // Aim: from the camera through the screen center.
+    // Aim: cast from the camera through the screen center to find the
+    // point the crosshair covers, then fire from the muzzle toward it —
+    // the standard third-person solution, so shots land where the
+    // crosshair points instead of plunging into the ground.
     raycaster.setFromCamera({ x: 0, y: 0 }, MB.W.camera);
-    const dir = raycaster.ray.direction;
-    const origin = raycaster.ray.origin;
+    const camDir = raycaster.ray.direction;
+    const camOrigin = raycaster.ray.origin;
+    const aimAt = CFG.pistolRange;
+    const aim = new THREE.Vector3(
+      camOrigin.x + camDir.x * aimAt,
+      Math.max(0.6, camOrigin.y + camDir.y * aimAt),
+      camOrigin.z + camDir.z * aimAt
+    );
+    const origin = muzzlePos();
+    const dir = new THREE.Vector3().subVectors(aim, origin).normalize();
     let best = null, bestD = CFG.pistolRange;
     function testTarget(x, y, z, radius, ref) {
       const dx = x - origin.x, dy = y - origin.y, dz = z - origin.z;
@@ -71,7 +82,7 @@
       }
     }
     MB.W.enemies.forEach(function (e) {
-      if (!e.dead) testTarget(e.pos.x, e.pos.y + 1.2, e.pos.z, 1.6, { type: 'enemy', ref: e });
+      if (!e.dead) testTarget(e.pos.x, e.pos.y + 1.2, e.pos.z, 1.9, { type: 'enemy', ref: e });
     });
     MB.W.peds.forEach(function (pd) {
       if (!pd.dead) testTarget(pd.pos.x, 1.2, pd.pos.z, 1.4, { type: 'ped', ref: pd });

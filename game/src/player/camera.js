@@ -50,7 +50,11 @@
     const cz = tz - Math.cos(yaw) * Math.cos(pitch) * dist;
     const cy = ty + Math.sin(pitch) * dist + curHeight * 0.15 + shake.y;
     cam.position.set(cx, Math.max(1.2, cy), cz);
-    cam.lookAt(tx, ty, tz);
+    // Look ahead of the player, not at the player's head: the crosshair
+    // then points at the world ahead (so the pistol can actually hit
+    // what it covers), and more of the street stays in frame.
+    const ahead = MB.S.inCar ? 9 : 5.5;
+    cam.lookAt(tx + Math.sin(yaw) * ahead, ty - 0.2, tz + Math.cos(yaw) * ahead);
   }
 
   function insideBuilding(x, z) {
