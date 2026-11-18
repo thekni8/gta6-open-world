@@ -24,7 +24,11 @@ import { MISSIONS } from './missions/story.js';
 
 const SPAWN = { x: 4, z: 0 };
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const params = new URLSearchParams(window.location.search);
+// ?perf=1 disables antialiasing + shadows for fast software-rendered testing.
+const perfMode = params.get('perf') === '1';
+
+const renderer = new THREE.WebGLRenderer({ antialias: !perfMode });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 document.getElementById('game-container').appendChild(renderer.domElement);
@@ -45,9 +49,14 @@ const G = {
 
 G.input = createInput(renderer.domElement);
 G.city = createCity(scene);
-G.daylight = createDaylight(scene, renderer);
+G.daylight = createDaylight(scene, renderer, perfMode);
 G.player = createPlayer(scene, SPAWN.x, SPAWN.z);
+// Face downtown (north) at spawn, with the camera behind — the first
+// mission's delivery car is ahead-right in the opening frame.
+G.player.heading = Math.PI;
+G.player.group.rotation.y = Math.PI;
 G.cameraRig = createCamera(camera);
+G.cameraRig.setYaw(0);
 G.traffic = createTraffic(scene, G.city);
 G.peds = createPedestrians(scene, G.city);
 G.wanted = createWanted(G.city);
@@ -156,6 +165,7 @@ function startMission(index) {
   G.state = 'playing';
   G.menus.hideAll();
   G.hud.show();
+  G.input.clear(); // the menu button's click must not leak in as a shot
   G.input.consumeMouse(); // drain menu-time mouse drift
   const ok = G.missions.startMission(index);
   if (!ok) { G.state = 'playing'; return; }
@@ -169,6 +179,7 @@ function startFreeRoam() {
   G.state = 'playing';
   G.menus.hideAll();
   G.hud.show();
+  G.input.clear();
   G.hud.toast('Free roam — Meridian Bay is yours. Steal a car, lose the cops, have fun.', 4);
 }
 
@@ -216,6 +227,7 @@ G.menus = createMenus({
     G.state = 'playing';
     G.menus.hideAll();
     G.hud.show();
+    G.input.clear();
   },
   restartMission() {
     if (G.missions.active) startMission(G.missionIndex);
@@ -242,6 +254,7 @@ G.menus = createMenus({
     G.state = 'playing';
     G.menus.hideAll();
     G.hud.show();
+    G.input.clear();
   },
 });
 
@@ -451,16 +464,21 @@ function updatePlaying(dt) {
     reloading: G.combat.reloading,
     prompt: nearCar ? (nearCar === mc ? 'E — Get in the car' : 'E — Steal car') : '',
   });
-  G.minimap.draw({
-    streets: G.city.streets,
-    hideout: G.city.hideout,
-    cars: G.traffic.all(),
-    peds: G.peds.peds,
-    police: G.chase.all(),
-    marker: G.missions.marker(),
-    player: { x: player.x, z: player.z, heading: player.heading },
-    time: G.time,
-  });
+  // Minimap redraws at 10 Hz — plenty for a live map, much cheaper.
+  G._mapT = (G._mapT || 0) + dt;
+  if (G._mapT >= 0.1) {
+    G._mapT = 0;
+    G.minimap.draw({
+      streets: G.city.streets,
+      hideout: G.city.hideout,
+      cars: G.traffic.all(),
+      peds: G.peds.peds,
+      police: G.chase.all(),
+      marker: G.missions.marker(),
+      player: { x: player.x, z: player.z, heading: player.heading },
+      time: G.time,
+    });
+  }
 }
 
 function updateMenu(dt) {
@@ -475,29 +493,61 @@ function updateMenu(dt) {
 // ---------- Screenshot staging (URL ?shot=cover|foot|drive|mission) ----------
 // Uses only the game's own public systems: starts a real mission, teleports
 // the player, spawns real police — the shots are genuine gameplay frames.
+function dressScene(carSpots, pedSpots) {
+  // Pull a few traffic cars and pedestrians into frame so no shot is empty.
+  carSpots.forEach((s, i) => {
+    const car = G.traffic.cars[i % G.traffic.cars.length];
+    car.setPos(s.x, s.z);
+    car.setHeading(s.heading);
+    car.speed = s.speed ?? 8;
+    car.lane.alongX = Math.abs(Math.sin(s.heading)) > 0.5;
+    car.lane.dir = car.lane.alongX ? Math.sign(Math.sin(s.heading)) : Math.sign(Math.cos(s.heading));
+    car.lane.street = car.lane.alongX ? s.z : s.x;
+  });
+  pedSpots.forEach((s, i) => {
+    const ped = G.peds.peds[i % G.peds.peds.length];
+    ped.x = s.x; ped.z = s.z;
+    ped.state = 'walk';
+    ped.target = { x: s.x + 20, z: s.z };
+    ped.mesh.position.set(s.x, 0, s.z);
+  });
+}
+
 function stageShot(kind) {
   G.sound.ensure();
   if (kind === 'cover') {
     startMission(2); // Heat Wave: 3 stars, police already hunting
     G.missions.current.timeLeft = 239;
-    const car = createCar(scene, { type: 'sedan', color: 0xd84040, role: 'player', x: 0, z: 150, heading: 0 });
+    const car = createCar(scene, { type: 'sedan', color: 0xd84040, role: 'player', x: 0, z: 175, heading: 0 });
+    car.speed = 8;
     enterCar(car, false);
     G.player.heading = 0;
-    // Roadblock ahead on the beachfront road + two chasers flanking.
-    G.chase.spawnRoadblock({ x: 0, z: 150 }, 0);
-    const c1 = G.chase.spawnPoliceCar(0, 150);
-    c1.setPos(-7, 138); c1.setHeading(0);
-    const c2 = G.chase.spawnPoliceCar(0, 150);
-    c2.setPos(7, 160); c2.setHeading(0);
+    // Roadblock ahead at the beach end of the road + two cruisers holding
+    // alongside (roadblock role: they hold position instead of ramming).
+    G.chase.spawnRoadblock({ x: 0, z: 175 }, 0);
+    for (const [fx, fz] of [[-6.5, 180], [6.5, 182]]) {
+      const flanker = createCar(scene, { type: 'police', color: 0xf2f2f2, role: 'roadblock', x: fx, z: fz, heading: 0 });
+      flanker.blockT = 0;
+      G.chase.roadblocks.push(flanker);
+    }
+    dressScene(
+      [{ x: -3.5, z: 195, heading: 0 }, { x: 3.5, z: 156, heading: Math.PI }, { x: -3.5, z: 146, heading: 0 }],
+      [{ x: -9.5, z: 168 }, { x: 9.5, z: 182 }, { x: -9.5, z: 192 }, { x: 9.5, z: 158 }],
+    );
     G.cameraRig.setYaw(Math.PI);
-    G.cameraRig.setPitch(0.52);
+    G.cameraRig.setPitch(0.48);
   } else if (kind === 'foot') {
     startMission(0);
     G.missions.current.timeLeft = 150;
     G.player.setPos(0, -24);
-    G.player.heading = Math.PI;
-    G.player.group.rotation.y = Math.PI;
-    G.cameraRig.setYaw(0);
+    // Angle the view toward the delivery car so it (and its beacon) are in frame.
+    G.player.heading = 2.74;
+    G.player.group.rotation.y = 2.74;
+    dressScene(
+      [{ x: -3.5, z: -44, heading: 0 }, { x: 3.5, z: -6, heading: Math.PI }, { x: -3.5, z: 8, heading: 0 }],
+      [{ x: -9.5, z: -32 }, { x: 9.5, z: -18 }, { x: -9.5, z: -12 }, { x: 9.5, z: -38 }, { x: 9.5, z: -28 }],
+    );
+    G.cameraRig.setYaw(-0.4);
     G.cameraRig.setPitch(0.42);
   } else if (kind === 'drive') {
     startMission(0);
@@ -507,11 +557,15 @@ function stageShot(kind) {
     enterCar(mc, false);
     G.missions.update(0.01);
     G.missions.current.timeLeft = 150;
-    mc.setPos(-60, 180);
+    mc.setPos(-60, 196.5);
     mc.setHeading(Math.PI / 2);
     mc.speed = 24;
     G.player.setPos(mc.x, mc.z);
     G.player.heading = Math.PI / 2;
+    dressScene(
+      [{ x: -35, z: 196.5, heading: Math.PI / 2 }, { x: -20, z: 203.5, heading: -Math.PI / 2 }, { x: 30, z: 196.5, heading: Math.PI / 2 }],
+      [{ x: -80, z: 190.5 }, { x: -40, z: 209.5 }, { x: -10, z: 190.5 }, { x: 10, z: 209.5 }],
+    );
     G.cameraRig.setYaw(-Math.PI / 2);
     G.cameraRig.setPitch(0.4);
   } else if (kind === 'mission') {
@@ -522,6 +576,10 @@ function stageShot(kind) {
     G.player.group.rotation.y = 0;
     G.missions.update(0.01); // reach the port -> gunmen spawn
     G.missions.current.timeLeft = 299;
+    // Step into the yard so the nearest gunman is big in frame with his health bar.
+    G.player.setPos(165, -124);
+    G.player.heading = 0;
+    G.player.group.rotation.y = 0;
     G.cameraRig.setYaw(Math.PI);
     G.cameraRig.setPitch(0.42);
   }
@@ -586,8 +644,8 @@ window.__mb = {
   police: () => G.chase.all().length,
 };
 
-const params = new URLSearchParams(window.location.search);
-const shot = params.get('shot');
+const params2 = params;
+const shot = params2.get('shot');
 if (shot) {
   stageShot(shot);
 } else {

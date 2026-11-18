@@ -10,12 +10,23 @@ export function createEffects(scene, cameraRig) {
     parts.push({ alive: false, life: 0, maxLife: 1, vx: 0, vy: 0, vz: 0, gravity: 0, size: 1 });
     positions[i * 3 + 1] = -100;
   }
+  // Round soft particle sprite (radial gradient) — no square confetti.
+  const spriteCanvas = document.createElement('canvas');
+  spriteCanvas.width = 32; spriteCanvas.height = 32;
+  const sg = spriteCanvas.getContext('2d');
+  const grad = sg.createRadialGradient(16, 16, 0, 16, 16, 16);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0.7)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  sg.fillStyle = grad;
+  sg.fillRect(0, 0, 32, 32);
+  const spriteTex = new THREE.CanvasTexture(spriteCanvas);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   const mat = new THREE.PointsMaterial({
     size: 0.55, vertexColors: true, transparent: true, opacity: 0.95,
-    depthWrite: false, sizeAttenuation: true,
+    depthWrite: false, sizeAttenuation: true, map: spriteTex, alphaTest: 0.01,
   });
   const points = new THREE.Points(geo, mat);
   points.frustumCulled = false;
@@ -50,8 +61,8 @@ export function createEffects(scene, cameraRig) {
   return {
     hitSpark(x, y, z) { burst(x, y, z, 10, [1, 0.85, 0.3], 6, 0.5, 12); },
     crash(x, z, speed) {
-      burst(x, 1, z, 22, [1, 0.7, 0.2], 8, 0.7, 10);
-      burst(x, 1.2, z, 10, [0.5, 0.5, 0.5], 3, 1.2, -1);
+      burst(x, 1, z, 12, [1, 0.7, 0.2], 8, 0.7, 10);
+      burst(x, 1.2, z, 6, [0.5, 0.5, 0.5], 3, 1.2, -1);
       cameraRig?.addShake(Math.min(0.6, speed * 0.02));
     },
     muzzle(camera) {

@@ -2,13 +2,13 @@
 // shadows that follow the player, sky color, and light distance fog.
 import { CFG } from '../config.js';
 
-export function createDaylight(scene, renderer) {
+export function createDaylight(scene, renderer, noShadows = false) {
   scene.background = new THREE.Color(CFG.skyColor);
   scene.fog = new THREE.Fog(CFG.fogColor, CFG.fogNear, CFG.fogFar);
 
   const sun = new THREE.DirectionalLight(CFG.sunColor, CFG.sunIntensity);
   sun.position.set(120, 180, 60);
-  sun.castShadow = true;
+  sun.castShadow = !noShadows;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -130;
   sun.shadow.camera.right = 130;
@@ -23,7 +23,7 @@ export function createDaylight(scene, renderer) {
   const hemi = new THREE.HemisphereLight(CFG.hemiSky, CFG.hemiGround, CFG.hemiIntensity);
   scene.add(hemi);
 
-  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.enabled = !noShadows;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;

@@ -72,7 +72,7 @@ export const CFG = {
   sunIntensity: 1.35,
   hemiSky: 0xbfe3ff,
   hemiGround: 0x8a7a5a,
-  hemiIntensity: 0.75,
+  hemiIntensity: 0.9,
   grassColor: 0x69b34c,
   roadColor: 0x3d3d42,
   sidewalkColor: 0xb9b3a4,

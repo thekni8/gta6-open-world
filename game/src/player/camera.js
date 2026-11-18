@@ -23,7 +23,7 @@ export function createCamera(camera) {
       const ok = input.orbitKeys();
       if (ok !== 0) yaw += ok * 1.9 * dt;
       // Driving: pull further back and lower; auto-center behind the car.
-      const wantDist = driving ? 12.5 : 8.5;
+      const wantDist = driving ? 11 : 7.5;
       const wantPitch = driving ? 0.34 : 0.46;
       dist += (wantDist - dist) * Math.min(1, dt * 2.2);
       if (Math.abs(speed) > 14 && driving) {

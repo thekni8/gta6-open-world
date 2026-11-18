@@ -61,6 +61,7 @@ export function createInput(canvas) {
     },
     isLocked() { return locked; },
     releaseLock() { if (document.pointerLockElement) document.exitPointerLock(); },
+    clear() { pressed.clear(); mouseClicked = false; mouseDown = false; },
     endFrame() { pressed.clear(); mouseClicked = false; },
   };
 }

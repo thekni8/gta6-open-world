@@ -62,8 +62,9 @@ export function createPlayer(scene, x, z) {
       const a = input.axis();
       const sprint = input.sprint();
       const speed = sprint ? CFG.sprintSpeed : CFG.walkSpeed;
-      // Forward is where the camera looks; strafe is perpendicular.
-      const fx = Math.sin(cameraYaw), fz = Math.cos(cameraYaw);
+      // Forward is where the camera looks: the camera sits at
+      // target + (sin yaw, cos yaw), so it looks along -(sin yaw, cos yaw).
+      const fx = -Math.sin(cameraYaw), fz = -Math.cos(cameraYaw);
       const sx = Math.cos(cameraYaw), sz = -Math.sin(cameraYaw);
       let mx = fx * a.f + sx * a.s;
       let mz = fz * a.f + sz * a.s;

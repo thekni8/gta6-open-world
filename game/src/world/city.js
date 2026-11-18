@@ -26,8 +26,8 @@ function roadTexture() {
   const c = document.createElement('canvas');
   c.width = 128; c.height = 128;
   const g = c.getContext('2d');
-  g.fillStyle = '#3d3d42'; g.fillRect(0, 0, 128, 128);
-  g.fillStyle = '#43434a';
+  g.fillStyle = '#48484f'; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = '#4e4e56';
   for (let i = 0; i < 260; i++) g.fillRect(Math.random() * 128, Math.random() * 128, 2, 2);
   g.fillStyle = '#e8c832';
   g.fillRect(61, 8, 6, 52); // center dash
@@ -218,7 +218,9 @@ export function createCity(scene) {
   const trunkMat = new THREE.MeshLambertMaterial({ color: 0x8a6a4a });
   const frondMat = new THREE.MeshLambertMaterial({ color: 0x2f9e44 });
   const palmSpots = [];
-  for (let x = -200; x <= 200; x += 20) {
+  // Avenue palms sit 10 units off the nearest north-south street so none
+  // lands on a road centerline.
+  for (let x = -190; x <= 190; x += 20) {
     palmSpots.push({ x: x + rng.range(-2, 2), z: 186 });
     if (rng.chance(0.5)) palmSpots.push({ x: x + rng.range(-2, 2), z: 174 });
   }
@@ -247,9 +249,10 @@ export function createCity(scene) {
   group.add(trunks, fronds);
 
   // ---- Park trees (trunk + round canopy), benches, pond ----
+  // Trees live inside the park blocks only — never on roads, where they
+  // would block the camera and the player's path.
   const treeSpots = [];
-  for (let i = 0; i < 30; i++) treeSpots.push({ x: rng.range(-38, 38), z: rng.range(84, 156) });
-  for (let i = 0; i < 14; i++) treeSpots.push({ x: rng.range(-200, 200), z: rng.range(-180, 60) });
+  for (let i = 0; i < 34; i++) treeSpots.push({ x: rng.range(-38, 38), z: rng.range(84, 156) });
   const treeTrunks = new THREE.InstancedMesh(trunkGeo, trunkMat, treeSpots.length);
   const canopyGeo = new THREE.IcosahedronGeometry(2.6, 0);
   const canopyMat = new THREE.MeshLambertMaterial({ color: 0x3d9e4f });
@@ -271,31 +274,33 @@ export function createCity(scene) {
   group.add(pond);
 
   // ---- Street lamps (instanced pole + glowing head) ----
+  // Lamps sit on sidewalk corners: east of north-south streets, and at the
+  // southeast corner of each intersection — never on a road centerline.
   const lampSpots = [];
   for (const s of STREETS) {
     for (let t = -180; t <= 180; t += 40) {
-      lampSpots.push({ x: s + 8.5, z: t });
-      lampSpots.push({ x: t, z: s + 8.5 });
+      lampSpots.push({ x: s + 9.5, z: t });
+      lampSpots.push({ x: t + 9.5, z: s + 9.5 });
     }
   }
-  const poleGeo = new THREE.CylinderGeometry(0.12, 0.16, 6, 5);
-  poleGeo.translate(0, 3, 0);
+  const poleGeo = new THREE.CylinderGeometry(0.12, 0.16, 5, 5);
+  poleGeo.translate(0, 2.5, 0);
   const poleMat = new THREE.MeshLambertMaterial({ color: 0x333338 });
-  const headGeo = new THREE.SphereGeometry(0.42, 8, 6);
-  const headMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
+  const headGeo = new THREE.SphereGeometry(0.22, 8, 6);
+  const headMat = new THREE.MeshLambertMaterial({ color: 0xffe9a0, emissive: 0x887733 });
   const poles = new THREE.InstancedMesh(poleGeo, poleMat, lampSpots.length);
   const heads = new THREE.InstancedMesh(headGeo, headMat, lampSpots.length);
   lampSpots.forEach((p, i) => {
     m4.makeTranslation(p.x, 0, p.z);
     poles.setMatrixAt(i, m4);
-    m4.makeTranslation(p.x, 6.1, p.z);
+    m4.makeTranslation(p.x, 5.1, p.z);
     heads.setMatrixAt(i, m4);
   });
   group.add(poles, heads);
 
   // ---- Beach umbrellas (colorful cones) ----
   const umbSpots = [];
-  for (let i = 0; i < 16; i++) umbSpots.push({ x: rng.range(-190, 190), z: rng.range(196, 222) });
+  for (let i = 0; i < 16; i++) umbSpots.push({ x: rng.range(-190, 190), z: rng.range(212, 228) });
   const umbPoleGeo = new THREE.CylinderGeometry(0.08, 0.08, 2.6, 5);
   umbPoleGeo.translate(0, 1.3, 0);
   const umbConeGeo = new THREE.ConeGeometry(2.2, 1.1, 8);
