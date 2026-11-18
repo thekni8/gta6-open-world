@@ -104,8 +104,9 @@ class Enemy {
     // Face the health bar at the camera.
     this.barBg.lookAt(G.camera.position);
     this.barFg.lookAt(G.camera.position);
+    // Shrink toward the centre: a sideways shift would drift in mesh space
+    // once lookAt reorients the bar.
     this.barFg.scale.x = clamp(this.health / this.maxHealth, 0, 1);
-    this.barFg.position.x = -(1 - this.barFg.scale.x) * 0.8;
     // Shoot the player when in range and roughly in the open.
     this.shootTimer -= dt;
     if (this.shootTimer <= 0 && dist < CFG.enemyAggroRange && !player.dead) {

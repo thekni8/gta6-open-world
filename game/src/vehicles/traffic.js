@@ -127,7 +127,7 @@ export class Traffic {
     const fx = Math.sin(car.heading);
     const fz = Math.cos(car.heading);
     let best = null;
-    const others = [G.player.inCar, ...this.cars, ...G.police.cars];
+    const others = [G.player.inCar, ...this.cars, ...G.police.cars, ...G.parkedCars];
     for (const o of others) {
       if (!o || o === car || o.dead) continue;
       const dx = o.x - car.x;
