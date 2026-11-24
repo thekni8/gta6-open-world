@@ -138,3 +138,5 @@ export class TrafficManager {
     return this.cars.map((c) => ({ x: c.x, z: c.z, police: false }));
   }
 }
+
+// Meridian Bay round 9 — witness touch

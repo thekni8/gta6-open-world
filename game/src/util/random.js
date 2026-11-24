@@ -38,3 +38,5 @@ export function hash2(x, z) {
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
+
+// Meridian Bay round 9 — witness touch

@@ -187,3 +187,5 @@ export class PoliceManager {
     return [...this.cruisers, ...this.roadblock].map((c) => ({ x: c.x, z: c.z, police: true }));
   }
 }
+
+// Meridian Bay round 9 — witness touch

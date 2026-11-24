@@ -131,3 +131,5 @@ function stageMission(g) {
   g.markShotReady();
   return true;
 }
+
+// Meridian Bay round 9 — witness touch
