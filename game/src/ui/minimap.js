@@ -1,212 +1,144 @@
-// Live minimap: a big, bright full-city view — green land, pale streets,
-// blue sea — with the player arrow, objective diamond, police and traffic.
-// The static city layer is pre-rendered once; only blips redraw per frame.
-import { CONFIG } from '../config.js';
+// The live minimap: a player-centered canvas showing roads, the sea and
+// the port, traffic, pedestrians, police, the mission marker and the
+// hideout. North-up, redrawn every frame.
+
+import { ROAD_LINES } from '../world/city.js';
 
 export class Minimap {
-  constructor(canvas, city) {
-    this.canvas = canvas;
-    this.city = city;
-    this.size = CONFIG.hud.minimapSize;
-    canvas.width = this.size;
-    canvas.height = this.size;
-    this.ctx = canvas.getContext('2d');
-    this.staticLayer = document.createElement('canvas');
-    this.staticLayer.width = this.size;
-    this.staticLayer.height = this.size;
-    this._renderStatic();
+  constructor(canvasId, size = 220, range = 130) {
+    this.canvas = document.getElementById(canvasId);
+    this.ctx = this.canvas.getContext('2d');
+    this.size = size;
+    this.range = range; // world metres shown from the center to an edge
+    this.canvas.width = size;
+    this.canvas.height = size;
   }
 
-  // World (-240..240) -> map pixels. North (z=-240) is up.
-  _toMap(x, z) {
-    const s = this.size / (CONFIG.world.half * 2);
-    return [(x + CONFIG.world.half) * s, (z + CONFIG.world.half) * s];
+  toMap(wx, wz, cx, cz) {
+    const s = this.size / (this.range * 2);
+    return {
+      x: this.size / 2 + (wx - cx) * s,
+      y: this.size / 2 + (wz - cz) * s,
+    };
   }
 
-  _renderStatic() {
-    const ctx = this.staticLayer.getContext('2d');
-    const s = this.size / (CONFIG.world.half * 2);
-    // Land: muted olive green — dark enough that blips pop, bright enough to read.
-    ctx.fillStyle = '#69a854';
-    ctx.fillRect(0, 0, this.size, this.size);
-    // Sea along the south edge (starts at 242).
-    ctx.fillStyle = '#2fa8c9';
-    ctx.fillRect(0, this._toMap(0, 242)[1], this.size, this.size);
-    // Beach sand strip (202..242).
-    ctx.fillStyle = '#f0dca8';
-    const [, beachY] = this._toMap(0, 202);
-    ctx.fillRect(0, beachY, this.size, this._toMap(0, 242)[1] - beachY);
-    // Park: deeper green block.
-    ctx.fillStyle = '#3f8f3f';
-    const [px, py] = this._toMap(28, 84);
-    ctx.fillRect(px, py, (140 - 28) * s, (168 - 84) * s);
-    // Port strip: industrial grey-beige.
-    ctx.fillStyle = '#b8a888';
-    ctx.fillRect(0, this._toMap(0, -28)[1], ( -168 + 240) * s, (196 + 28) * s);
-    // Blocks: muted sidewalk slabs between roads.
-    ctx.fillStyle = '#cfc7a3';
-    const lines = CONFIG.world.roadLines;
-    const edges = [-240, ...lines.map((l) => l - 6)];
-    const edges2 = [...lines.map((l) => l + 6), 240];
-    for (let i = 0; i < edges.length; i++) {
-      for (let j = 0; j < edges.length; j++) {
-        const [bx, bz] = this._toMap(edges[i], edges[j]);
-        ctx.fillRect(bx, bz, (edges2[i] - edges[i]) * s, (edges2[j] - edges[j]) * s);
+  draw(state) {
+    const { ctx, size } = this;
+    const { playerX, playerZ, playerHeading, traffic, peds, police, marker, hideout, time } = state;
+    ctx.clearRect(0, 0, size, size);
+
+    // Land background.
+    ctx.fillStyle = '#23282e';
+    ctx.fillRect(0, 0, size, size);
+
+    // Sea to the south, port concrete to the east.
+    const seaTop = this.toMap(0, 340, playerX, playerZ).y;
+    if (seaTop < size) {
+      ctx.fillStyle = '#1f8fa8';
+      ctx.fillRect(0, Math.max(0, seaTop), size, size - Math.max(0, seaTop));
+    }
+    const portLeft = this.toMap(300, 0, playerX, playerZ).x;
+    if (portLeft < size) {
+      ctx.fillStyle = '#4a4e54';
+      ctx.fillRect(Math.max(0, portLeft), 0, size - Math.max(0, portLeft), size);
+    }
+
+    // Roads.
+    ctx.strokeStyle = '#3d434b';
+    ctx.lineWidth = Math.max(2, size / (this.range * 2) * 14);
+    for (const line of ROAD_LINES) {
+      const vx = this.toMap(line, 0, playerX, playerZ).x;
+      ctx.beginPath();
+      ctx.moveTo(vx, 0);
+      ctx.lineTo(vx, size);
+      ctx.stroke();
+      const hz = this.toMap(0, line, playerX, playerZ).y;
+      ctx.beginPath();
+      ctx.moveTo(0, hz);
+      ctx.lineTo(size, hz);
+      ctx.stroke();
+    }
+
+    const dot = (wx, wz, r, color) => {
+      const p = this.toMap(wx, wz, playerX, playerZ);
+      if (p.x < -4 || p.x > size + 4 || p.y < -4 || p.y > size + 4) return;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    for (const p of peds) dot(p.x, p.z, 1.6, '#9aa0a6');
+    for (const t of traffic) dot(t.x, t.z, 2.6, '#4fb0c9');
+    const policeColor = Math.floor(time * 3) % 2 === 0 ? '#ff4040' : '#4080ff';
+    for (const p of police) dot(p.x, p.z, 3.2, policeColor);
+
+    // Hideout marker (yellow house diamond), clamped to the edge when far.
+    if (hideout) {
+      const raw = this.toMap(hideout.x, hideout.z, playerX, playerZ);
+      {
+        const p = {
+          x: Math.max(8, Math.min(size - 8, raw.x)),
+          y: Math.max(8, Math.min(size - 8, raw.y)),
+        };
+        ctx.fillStyle = '#ffd23f';
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y - 6);
+        ctx.lineTo(p.x + 5, p.y);
+        ctx.lineTo(p.x, p.y + 6);
+        ctx.lineTo(p.x - 5, p.y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#23282e';
+        ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
       }
     }
-    // Roads: bright pale strips over the blocks.
-    ctx.fillStyle = '#f2efe4';
-    for (const l of lines) {
-      const [, ry] = this._toMap(0, l);
-      ctx.fillRect(0, ry - 6 * s, this.size, 12 * s);
-      const [rx] = this._toMap(l, 0);
-      ctx.fillRect(rx - 6 * s, 0, 12 * s, this.size);
-    }
-    // Buildings: their real pastel colours, slightly darkened.
-    for (const b of this.city.buildings) {
-      const [bx, bz] = this._toMap(b.x - b.w / 2, b.z - b.d / 2);
-      ctx.fillStyle = `#${b.color.toString(16).padStart(6, '0')}`;
-      ctx.globalAlpha = 0.85;
-      ctx.fillRect(bx, bz, Math.max(1.5, b.w * s), Math.max(1.5, b.d * s));
-    }
-    ctx.globalAlpha = 1;
-    // District labels, small but legible.
-    ctx.fillStyle = 'rgba(20, 60, 20, 0.75)';
-    ctx.font = 'bold 9px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    const labels = [
-      ['DOWNTOWN', 0, 0], ['OLD TOWN', -160, -140], ['NORTHSIDE', 80, -160],
-      ['BAYFRONT', 0, 215], ['PORT', -205, 80], ['MARINA', 210, 60], ['PARK', 84, 126],
-    ];
-    for (const [text, x, z] of labels) {
-      const [lx, ly] = this._toMap(x, z);
-      ctx.fillText(text, lx, ly);
-    }
-  }
 
-  draw(game, t) {
-    const ctx = this.ctx;
-    ctx.clearRect(0, 0, this.size, this.size);
-    ctx.drawImage(this.staticLayer, 0, 0);
-    // Circular clip for the classic minimap look.
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(this.size / 2, this.size / 2, this.size / 2, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.drawImage(this.staticLayer, 0, 0);
-    const player = game.player;
-
-    // Traffic dots: dark slate squares with a white rim — visible on pale streets.
-    for (const c of game.traffic.cars) {
-      const [x, y] = this._toMap(c.pos.x, c.pos.z);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(x - 2.5, y - 2.5, 5, 5);
-      ctx.fillStyle = '#33383e';
-      ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
-    }
-    // Pedestrian dots: small white dots with a dark rim — the map teems.
-    for (const p of game.peds.peds) {
-      if (p.state === 'down' || p.isEnemy) continue;
-      const [x, y] = this._toMap(p.pos.x, p.pos.z);
-      ctx.fillStyle = '#33383e';
-      ctx.beginPath();
-      ctx.arc(x, y, 2.4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(x, y, 1.4, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Enemy dots.
-    ctx.fillStyle = '#ff2222';
-    for (const e of game.weapons.aliveEnemies()) {
-      const [x, y] = this._toMap(e.pos.x, e.pos.z);
-      ctx.beginPath();
-      ctx.arc(x, y, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Police: flashing blue/red dots.
-    for (const cop of [...game.police.cars, ...game.police.roadblockCars]) {
-      const [x, y] = this._toMap(cop.pos.x, cop.pos.z);
-      ctx.fillStyle = Math.sin(t * 10) > 0 ? '#2244ff' : '#ff2222';
-      ctx.beginPath();
-      ctx.arc(x, y, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-    // Objective diamond (pulsing).
-    const step = game.missions.currentStep();
-    const target = this._objectiveTarget(game, step);
-    if (target) {
-      const [x, y] = this._toMap(target.x, target.z);
-      const r = 9 + Math.sin(t * 5) * 1.5;
-      ctx.fillStyle = '#ffd23d';
-      ctx.strokeStyle = '#7a5200';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(x, y - r);
-      ctx.lineTo(x + r, y);
-      ctx.lineTo(x, y + r);
-      ctx.lineTo(x - r, y);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    }
-    // Choice markers (mission 5).
-    if (step?.type === 'choice') {
-      for (const opt of step.options) {
-        const [x, y] = this._toMap(opt.x, opt.z);
-        ctx.fillStyle = `#${opt.color.toString(16).padStart(6, '0')}`;
+    // Mission marker: pulsing yellow waypoint, clamped to the edge.
+    if (marker) {
+      const drawMarker = (mx, mz) => {
+        let p = this.toMap(mx, mz, playerX, playerZ);
+        const edge = p.x < 8 || p.x > size - 8 || p.y < 8 || p.y > size - 8;
+        p = {
+          x: Math.max(8, Math.min(size - 8, p.x)),
+          y: Math.max(8, Math.min(size - 8, p.y)),
+        };
+        const pulse = 5 + Math.sin(time * 4) * 1.5;
+        ctx.fillStyle = edge ? '#ffd23f' : '#ffe066';
         ctx.beginPath();
-        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.moveTo(p.x, p.y - pulse);
+        ctx.lineTo(p.x + pulse, p.y);
+        ctx.lineTo(p.x, p.y + pulse);
+        ctx.lineTo(p.x - pulse, p.y);
+        ctx.closePath();
         ctx.fill();
-        ctx.strokeStyle = '#ffffff';
+        ctx.strokeStyle = '#23282e';
         ctx.lineWidth = 1.5;
         ctx.stroke();
-      }
+      };
+      drawMarker(marker.x, marker.z);
+      if (marker.second) drawMarker(marker.second.x, marker.second.z);
     }
-    ctx.restore();
 
-    // Player arrow: big white triangle with a dark outline, rotated to face travel.
-    const [px, py] = this._toMap(player.pos.x, player.pos.z);
-    const heading = player.inCar && player.car ? player.car.angle + Math.PI : player.angle;
+    // Player: white arrow, rotated by heading (map north is -z, so +PI).
     ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(heading);
+    ctx.translate(size / 2, size / 2);
+    ctx.rotate(playerHeading + Math.PI);
     ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#1a1a1a';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#23282e';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(0, -11);
-    ctx.lineTo(7.5, 8);
-    ctx.lineTo(0, 3.5);
-    ctx.lineTo(-7.5, 8);
+    ctx.moveTo(0, -8);
+    ctx.lineTo(5.5, 6);
+    ctx.lineTo(-5.5, 6);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
     ctx.restore();
 
-    // North tick.
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.font = 'bold 11px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('N', this.size / 2, 14);
-  }
-
-  _objectiveTarget(game, step) {
-    if (!step) return null;
-    if (step.type === 'goto' || step.type === 'gotoCar' || step.type === 'steal') {
-      return { x: step.x, z: step.z };
-    }
-    if (step.type === 'eliminate') {
-      const alive = game.weapons.aliveEnemies();
-      if (alive.length > 0) return { x: alive[0].pos.x, z: alive[0].pos.z };
-      const spawns = step.spawns || game.missions.active?.rivalSpawns;
-      if (spawns?.length) return { x: spawns[0][0], z: spawns[0][1] };
-    }
-    if (step.type === 'loseHeat') return { x: 96, z: 130 }; // hideout
-    return null;
+    // Border ring.
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, size - 2, size - 2);
   }
 }

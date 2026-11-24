@@ -1,98 +1,95 @@
-// Keyboard + mouse input. Tracks held keys, just-pressed edges (consumed
-// once per frame), mouse deltas for the orbit camera, and pointer lock.
+// Keyboard + mouse handling. Tracks held keys, edge-triggered presses,
+// mouse look deltas and mouse buttons. Pointer lock is requested on the
+// canvas while playing and released in menus.
+
 export class Input {
   constructor(canvas) {
     this.canvas = canvas;
-    this.downKeys = new Set();
-    this.pressedKeys = new Set();
+    this.keys = new Set();
+    this.pressed = new Set();
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.mouseDown = false;
-    this.mousePressed = false;
-    this.pointerLocked = false;
-    this.enabled = true;
+    this.mouseClicked = false;
+    this.locked = false;
+    this.onLockChange = null; // (locked) => void; Esc exits lock without a keydown
 
     window.addEventListener('keydown', (e) => {
-      if (!this.enabled) return;
-      if (e.code === 'Space') e.preventDefault();
-      if (!this.downKeys.has(e.code)) this.pressedKeys.add(e.code);
-      this.downKeys.add(e.code);
+      if (e.repeat) return;
+      const k = e.key.toLowerCase();
+      this.keys.add(k);
+      this.pressed.add(k);
+      if ([' ', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => {
-      this.downKeys.delete(e.code);
+      this.keys.delete(e.key.toLowerCase());
     });
     window.addEventListener('blur', () => {
-      this.downKeys.clear();
-      this.pressedKeys.clear();
+      this.keys.clear();
+      this.mouseDown = false;
     });
     document.addEventListener('mousemove', (e) => {
-      if (this.pointerLocked) {
-        this.mouseDX += e.movementX || 0;
-        this.mouseDY += e.movementY || 0;
-      }
-    });
-    // Only clicks on the game canvas itself count as attacks — clicks on
-    // menu buttons and overlays must never fire the pistol.
-    document.addEventListener('mousedown', (e) => {
-      if (e.button === 0 && e.target === this.canvas) {
-        this.mouseDown = true;
-        this.mousePressed = true;
-      }
-    });
-    document.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouseDown = false;
+      if (!this.locked) return;
+      this.mouseDX += e.movementX || 0;
+      this.mouseDY += e.movementY || 0;
     });
     document.addEventListener('pointerlockchange', () => {
-      this.pointerLocked = document.pointerLockElement === this.canvas;
+      this.locked = document.pointerLockElement === canvas;
+      this.onLockChange?.(this.locked);
     });
-    // Clicking the canvas while playing locks the pointer for mouse-look.
-    canvas.addEventListener('click', () => {
-      if (this.enabled && this.pointerLockWanted) {
-        this._lock();
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0) {
+        this.mouseDown = true;
+        this.mouseClicked = true;
       }
     });
-    this.pointerLockWanted = false;
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.mouseDown = false;
+    });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  _lock() {
+  lock() {
+    if (this.locked) return;
     try {
-      const p = this.canvas.requestPointerLock();
+      const p = this.canvas.requestPointerLock?.();
+      // Headless / gesture-less lock attempts reject; that is fine.
       if (p && typeof p.catch === 'function') p.catch(() => {});
     } catch {
-      /* pointer lock needs a user gesture; the click handler retries */
+      // Pointer lock unavailable; mouse look still works via drag-free deltas.
     }
   }
 
-  down(code) {
-    return this.downKeys.has(code);
+  unlock() {
+    if (this.locked) document.exitPointerLock?.();
   }
 
-  pressed(code) {
-    return this.pressedKeys.has(code);
+  isDown(key) {
+    return this.keys.has(key.toLowerCase());
   }
 
-  consumeMousePress() {
-    const p = this.mousePressed;
-    this.mousePressed = false;
-    return p;
+  // True once, on the frame the key went down.
+  wasPressed(key) {
+    return this.pressed.has(key.toLowerCase());
   }
 
-  // Call once per frame after all systems have read input.
-  endFrame() {
-    this.pressedKeys.clear();
+  // WASD as a -1..1 pair, forward positive.
+  moveAxes() {
+    const f = (this.isDown('w') ? 1 : 0) - (this.isDown('s') ? 1 : 0);
+    const s = (this.isDown('d') ? 1 : 0) - (this.isDown('a') ? 1 : 0);
+    return { forward: f, strafe: s };
+  }
+
+  consumeLook() {
+    const dx = this.mouseDX;
+    const dy = this.mouseDY;
     this.mouseDX = 0;
     this.mouseDY = 0;
+    return { dx, dy };
   }
 
-  requestLock() {
-    this.pointerLockWanted = true;
-    if (document.pointerLockElement !== this.canvas) {
-      this._lock();
-    }
-  }
-
-  releaseLock() {
-    this.pointerLockWanted = false;
-    if (document.exitPointerLock) document.exitPointerLock();
+  endFrame() {
+    this.pressed.clear();
+    this.mouseClicked = false;
   }
 }

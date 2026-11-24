@@ -1,50 +1,46 @@
-// localStorage save/load: mission progress, cash, and where the player
-// was standing. Small, versioned, and tolerant of corrupt data.
-import { CONFIG } from '../config.js';
+// localStorage save / load. Keeps mission progress, cash, and the player's
+// last position so Continue drops the player back into Meridian Bay.
 
-export function defaultSave() {
-  return {
-    version: 1,
-    missionIndex: 0, // next mission to play (0..5; 5 = story complete)
-    missionsDone: [],
-    cash: 250,
-    playerX: 0,
-    playerZ: 28, // downtown road — open ground, not against a wall
-    savedAt: 0,
-  };
+const KEY = 'meridian-bay-save-v1';
+
+export function saveGame(data) {
+  try {
+    localStorage.setItem(KEY, JSON.stringify({
+      missionIndex: data.missionIndex ?? 0,
+      cash: data.cash ?? 0,
+      hp: data.hp ?? 100,
+      ammo: data.ammo ?? 12,
+      reserveAmmo: data.reserveAmmo ?? 48,
+      kills: data.kills ?? 0,
+      position: data.position ?? null,
+      savedAt: Date.now(),
+    }));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-export function loadSave() {
+export function loadGame() {
   try {
-    const raw = localStorage.getItem(CONFIG.saveKey);
+    const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!data || data.version !== 1) return null;
-    return { ...defaultSave(), ...data };
+    if (typeof data !== 'object' || data === null) return null;
+    return data;
   } catch {
     return null;
   }
 }
 
-export function writeSave(save) {
-  try {
-    localStorage.setItem(
-      CONFIG.saveKey,
-      JSON.stringify({ ...save, savedAt: Date.now() }),
-    );
-  } catch {
-    /* storage full or blocked: the game still runs, it just won't persist */
-  }
+export function hasSave() {
+  return loadGame() !== null;
 }
 
 export function clearSave() {
   try {
-    localStorage.removeItem(CONFIG.saveKey);
+    localStorage.removeItem(KEY);
   } catch {
-    /* ignore */
+    // Storage unavailable; nothing to clear.
   }
-}
-
-export function hasSave() {
-  return loadSave() !== null;
 }

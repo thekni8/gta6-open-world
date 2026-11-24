@@ -1,213 +1,180 @@
-// Mission state machine: starts missions, tracks steps and the countdown,
-// spawns mission cars and gunmen, pays rewards, and handles fail/restart.
-import { CONFIG } from '../config.js';
-import { MISSIONS, HIDEOUT } from './story.js';
+// Mission state: triggers, objectives, rewards, fail and restart. The
+// manager owns the objective beacon (light pillar + bouncing arrow) and
+// spawns mission-specific things (the M2 getaway car, the M4 gunmen).
+
+import { MISSIONS } from './story.js';
 import { Car } from '../vehicles/cars.js';
+import { Enemies } from '../combat/enemies.js';
 
 export class MissionManager {
-  constructor(game) {
-    this.game = game;
-    this.active = null; // { def, stepIndex, timeLeft, kills, chosenSide }
-    this.completed = new Set(game.save.missionsDone || []);
-    this.stealCar = null;
-    this.choiceMarkers = [];
+  constructor(scene, colliders, hooks) {
+    this.scene = scene;
+    this.colliders = colliders;
+    this.hooks = hooks; // { toast, setWanted, onComplete, onFail }
+    this.index = 0;
+    this.objectiveIndex = 0;
+    this.active = false;
+    this.finished = false;
+    this.missionCar = null;
+    this.enemies = new Enemies(scene, colliders);
+    this.choiceMade = null;
+
+    // Objective beacon: a tall light pillar and a bouncing yellow arrow.
+    const pillarMat = new THREE.MeshBasicMaterial({
+      color: 0xffd23f, transparent: true, opacity: 0.08,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    this.beacon = new THREE.Group();
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 60, 12, 1, true), pillarMat);
+    pillar.position.y = 30;
+    this.beacon.add(pillar);
+    const arrowMat = new THREE.MeshBasicMaterial({ color: 0xffd23f });
+    this.arrow = new THREE.Mesh(new THREE.ConeGeometry(1.1, 2.0, 4), arrowMat);
+    this.arrow.rotation.x = Math.PI;
+    this.arrow.position.y = 4.2;
+    this.beacon.add(this.arrow);
+    this.beacon.visible = false;
+    scene.add(this.beacon);
   }
 
-  get currentIndex() {
-    return this.game.save.missionIndex;
+  get mission() {
+    return MISSIONS[this.index] ?? null;
   }
 
-  nextMission() {
-    return MISSIONS[this.currentIndex] || null;
+  get objective() {
+    const m = this.mission;
+    if (!m) return null;
+    return m.objectives[this.objectiveIndex] ?? null;
   }
 
-  inHideout(x, z) {
-    return Math.hypot(x - HIDEOUT.x, z - HIDEOUT.z) < HIDEOUT.radius;
-  }
-
-  currentStep() {
-    if (!this.active) return null;
-    return this.active.def.steps[this.active.stepIndex];
-  }
-
-  objectiveText() {
-    if (!this.active) return 'Free roam — explore Meridian Bay';
-    const step = this.currentStep();
-    if (!step) return this.active.def.title;
-    if (step.type === 'eliminate') {
-      return `${step.label} (${this.active.kills}/${step.count})`;
+  get objectiveText() {
+    const o = this.objective;
+    if (!o) return '';
+    if (o.type === 'eliminate') {
+      const left = this.enemies.aliveCount();
+      return `${o.text} — ${o.count - left}/${o.count} eliminated`;
     }
-    return step.label;
+    return o.text;
   }
 
-  startMission(index) {
-    const def = MISSIONS[index];
-    if (!def) return false;
-    this.cleanupMissionObjects();
-    this.active = { def, stepIndex: 0, timeLeft: def.timeLimit, kills: 0, chosenSide: null };
-    const game = this.game;
-    if (def.startWanted) game.wanted.setStars(def.startWanted, game);
-    game.sound.missionStart();
-    game.hud.showToast(`${def.title} — ${def.giver}`, def.briefing);
-    this._enterStep();
-    return true;
+  marker() {
+    const o = this.objective;
+    if (!o) return null;
+    if (o.type === 'choice') return { x: o.kings.x, z: o.kings.z, second: { x: o.vesper.x, z: o.vesper.z } };
+    return { x: o.x, z: o.z };
   }
 
-  // Jump to a later step (used by screenshot staging and mission restarts).
-  jumpToStep(index) {
-    if (!this.active) return;
-    this.active.stepIndex = Math.min(index, this.active.def.steps.length - 1);
-    this.active.kills = 0;
-    this._enterStep();
-  }
-
-  _enterStep() {
-    const game = this.game;
-    const step = this.currentStep();
-    if (!step) return;
-    game.beacon.hide();
-    if (step.type === 'goto' || step.type === 'gotoCar') {
-      game.beacon.show(step.x, step.z);
-    } else if (step.type === 'steal') {
-      // The marked coupe: bright red, parked at the marker.
-      this.stealCar = new Car(game.scene, { x: step.x, z: step.z, angle: Math.PI / 2, color: 0xd91e1e, kind: 'sedan' });
-      this.stealCar.driver = null;
-      game.traffic.parked.push(this.stealCar); // so E can enter it
-      game.beacon.show(step.x, step.z);
-    } else if (step.type === 'eliminate') {
-      const spawns = step.spawns || this.active.rivalSpawns || [];
-      for (const [x, z] of spawns) game.weapons.spawnEnemy(game, x, z);
-      if (spawns.length > 0) game.beacon.show(spawns[0][0], spawns[0][1]);
-    } else if (step.type === 'choice') {
-      // Two beacons, one per crew; the manager watches both.
-      for (const opt of step.options) {
-        const marker = game.makeChoiceMarker(opt);
-        this.choiceMarkers.push(marker);
-      }
-    }
-  }
-
-  onEnemyDown() {
-    if (!this.active) return;
-    const step = this.currentStep();
-    if (step?.type === 'eliminate') {
-      this.active.kills += 1;
-      if (this.active.kills >= step.count) this._advance();
-    }
-  }
-
-  onPlayerEnterCar(car) {
-    if (!this.active) return;
-    const step = this.currentStep();
-    if (step?.type === 'steal' && car === this.stealCar) {
-      this._advance();
-    }
-  }
-
-  _advance() {
-    const game = this.game;
-    this.active.stepIndex += 1;
-    this.active.kills = 0;
-    if (this.active.stepIndex >= this.active.def.steps.length) {
-      this._complete();
+  startMission(i) {
+    this.index = i;
+    this.objectiveIndex = 0;
+    this.active = true;
+    this.finished = false;
+    this.choiceMade = null;
+    this.enemies.clear();
+    this.clearMissionCar();
+    const m = this.mission;
+    if (!m) {
+      this.active = false;
       return;
     }
-    game.sound.pickup();
-    this._enterStep();
+    this.hooks.toast(`MISSION ${m.id}: ${m.title}`, m.intro);
+    if (m.onStart === 'wanted3') this.hooks.setWanted(3);
+    this.setupObjective();
+    this.updateBeacon();
   }
 
-  _complete() {
-    const game = this.game;
-    const def = this.active.def;
-    this.completed.add(def.id);
-    game.save.missionsDone = [...this.completed];
-    game.save.missionIndex = Math.min(MISSIONS.length, def.id + 1);
-    game.cash += def.reward;
-    game.save.cash = game.cash;
-    game.saveGame();
-    game.sound.missionComplete();
-    game.particles.cashBurst(game.player.pos.x, 2, game.player.pos.z);
-    this.cleanupMissionObjects();
-    this.active = null;
-    game.hud.showMissionComplete(def);
-    game.input.releaseLock(); // the mouse must be free to click Continue
-    game.state = 'missionEnd';
-    game.stateTimer = 0;
+  setupObjective() {
+    const o = this.objective;
+    if (!o) return;
+    if (o.type === 'enterCar') {
+      this.missionCar = new Car(this.scene, this.colliders, o.carColor ?? 0x4f7ec9);
+      this.missionCar.setPosition(o.x, o.z, Math.PI / 2);
+      this.missionCar.ai = { parked: true };
+    }
+    if (o.type === 'eliminate') {
+      this.enemies.spawn(o.count, { x: o.x, z: o.z }, 26);
+    }
+    this.updateBeacon();
+  }
+
+  clearMissionCar() {
+    if (this.missionCar) {
+      this.missionCar.remove(this.scene);
+      this.missionCar = null;
+    }
+  }
+
+  updateBeacon() {
+    const m = this.marker();
+    if (!m || !this.active) {
+      this.beacon.visible = false;
+      return;
+    }
+    this.beacon.visible = true;
+    this.beacon.position.set(m.x, 0, m.z);
+  }
+
+  advance() {
+    this.objectiveIndex++;
+    if (this.objectiveIndex >= this.mission.objectives.length) {
+      this.completeMission();
+      return;
+    }
+    this.setupObjective();
+    this.hooks.toast('OBJECTIVE UPDATED', this.objectiveText);
+  }
+
+  completeMission() {
+    const m = this.mission;
+    this.active = false;
+    this.finished = true;
+    this.beacon.visible = false;
+    this.enemies.clear();
+    this.clearMissionCar();
+    this.hooks.onComplete(m);
   }
 
   fail(reason) {
-    const game = this.game;
     if (!this.active) return;
-    const def = this.active.def;
-    game.sound.missionFailed();
-    this.cleanupMissionObjects();
-    this.active = null;
-    game.wanted.clear();
-    game.police.clearAll();
-    game.hud.showMissionFailed(def, reason);
-    game.input.releaseLock(); // the mouse must be free to click Retry
-    game.state = 'missionEnd';
-    game.stateTimer = 0;
+    this.active = false;
+    this.beacon.visible = false;
+    this.enemies.clear();
+    this.hooks.onFail(this.mission, reason);
   }
 
-  cleanupMissionObjects() {
-    const game = this.game;
-    if (this.stealCar) {
-      // Keep the coupe in the world if the player is driving it; else remove.
-      if (game.player.car !== this.stealCar) this.stealCar.remove();
-      this.stealCar = null;
-    }
-    game.weapons.clearEnemies(game);
-    for (const m of this.choiceMarkers) game.scene.remove(m);
-    this.choiceMarkers = [];
-    game.beacon.hide();
+  retry() {
+    this.startMission(this.index);
   }
 
-  update(dt) {
-    if (!this.active) return;
-    const game = this.game;
-    const player = game.player;
-    this.active.timeLeft -= dt;
-    if (this.active.timeLeft <= 0) {
-      this.fail('Out of time');
-      return;
+  // ctx: { playerPos, inCar, enteredCar, wantedStars }
+  update(dt, now, ctx) {
+    if (this.active) {
+      this.arrow.position.y = 4.2 + Math.sin(now * 3) * 0.8;
+      this.arrow.rotation.y += dt * 2;
     }
-    const step = this.currentStep();
-    if (!step) return;
-    const dist = (x, z) => Math.hypot(player.pos.x - x, player.pos.z - z);
-    switch (step.type) {
-      case 'goto':
-        if (dist(step.x, step.z) < step.radius) this._advance();
-        break;
-      case 'gotoCar':
-        if (player.inCar && player.car === this.stealCar && dist(step.x, step.z) < step.radius) {
-          this._advance();
-        } else if (!player.inCar && dist(step.x, step.z) < step.radius) {
-          game.hud.showToast('Bring the coupe', 'You need to arrive in the stolen coupe.');
-        }
-        break;
-      case 'loseHeat':
-        if (game.wanted.stars === 0) this._advance();
-        break;
-      case 'choice': {
-        for (const opt of step.options) {
-          if (dist(opt.x, opt.z) < 10) {
-            this.active.chosenSide = opt.name;
-            const rivalAt = opt.name === 'Harbor Kings'
-              ? [[140, -140], [152, -128], [128, -128], [140, -156]]
-              : [[-140, -140], [-152, -128], [-128, -128], [-140, -156]];
-            this.active.rivalSpawns = rivalAt;
-            game.hud.showToast(`Side chosen: ${opt.name}`, 'Now finish the rival crew.');
-            for (const m of this.choiceMarkers) game.scene.remove(m);
-            this.choiceMarkers = [];
-            this._advance();
-            break;
-          }
-        }
-        break;
+    if (!this.active) return;
+    const o = this.objective;
+    if (!o) return;
+    const p = ctx.playerPos;
+    if (o.type === 'goto') {
+      if (Math.hypot(p.x - o.x, p.z - o.z) < 9) this.advance();
+    } else if (o.type === 'enterCar') {
+      if (ctx.inCar && ctx.enteredCar === this.missionCar) {
+        this.hooks.toast('CAR STOLEN', 'The Kings will want this one clean. Get to the hideout.');
+        this.advance();
       }
-      default:
-        break;
+    } else if (o.type === 'loseWanted') {
+      if (ctx.wantedStars === 0) this.advance();
+    } else if (o.type === 'eliminate') {
+      if (this.enemies.aliveCount() === 0) this.advance();
+    } else if (o.type === 'choice') {
+      if (Math.hypot(p.x - o.kings.x, p.z - o.kings.z) < 10) {
+        this.choiceMade = 'Harbor Kings';
+        this.advance();
+      } else if (Math.hypot(p.x - o.vesper.x, p.z - o.vesper.z) < 10) {
+        this.choiceMade = 'Vesper Syndicate';
+        this.advance();
+      }
     }
   }
 }

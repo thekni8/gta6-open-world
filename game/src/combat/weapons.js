@@ -1,256 +1,138 @@
-// Melee + pistol combat: raycast shooting from the camera, muzzle flash,
-// tracers, hit feedback, and enemy gunmen with health bars for missions.
+// Combat: the 9mm pistol with crosshair shooting, muzzle flash, bullet
+// tracers, hit sparks and floating damage numbers — plus a melee swing.
+
 import { CONFIG } from '../config.js';
 
 export class Weapons {
-  constructor(scene, city) {
+  constructor(scene, particles, hooks) {
     this.scene = scene;
-    this.city = city;
+    this.particles = particles;
+    this.hooks = hooks; // { onDamageNumber(pos, amount), onShoot(), onKill(enemy) }
+    this.ammo = CONFIG.pistolMag;
+    this.reserve = CONFIG.pistolReserveStart;
     this.cooldown = 0;
     this.raycaster = new THREE.Raycaster();
-    this.tracers = [];
-    this.tracerGeo = new THREE.BufferGeometry();
-    this.enemies = []; // mission gunmen (ped-shaped, hostile)
-    this.enemyHealthBars = [];
+
+    // Muzzle flash: a bright cone + a camera-facing glow sprite + a point
+    // light, shown for a blink. The sprite is what reads from behind.
+    this.flash = new THREE.Group();
+    const flashMat = new THREE.MeshBasicMaterial({
+      color: 0xffd76a, transparent: true, opacity: 0.95,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.3, 8), flashMat);
+    cone.rotation.x = Math.PI / 2;
+    this.flash.add(cone);
+    const glowCanvas = document.createElement('canvas');
+    glowCanvas.width = 64;
+    glowCanvas.height = 64;
+    const gctx = glowCanvas.getContext('2d');
+    const grad = gctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+    grad.addColorStop(0, 'rgba(255,240,180,1)');
+    grad.addColorStop(0.4, 'rgba(255,200,80,0.85)');
+    grad.addColorStop(1, 'rgba(255,160,40,0)');
+    gctx.fillStyle = grad;
+    gctx.fillRect(0, 0, 64, 64);
+    const glowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(glowCanvas),
+      blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
+    }));
+    glowSprite.scale.set(2.4, 2.4, 1);
+    this.flash.add(glowSprite);
+    this.flashLight = new THREE.PointLight(0xffc860, 20, 14, 2);
+    this.flash.add(this.flashLight);
+    this.flash.visible = false;
+    scene.add(this.flash);
+    this.flashTimer = 0;
+
+    // Tracer: one reusable line, re-aimed every shot.
+    const tracerGeo = new THREE.BufferGeometry();
+    tracerGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+    this.tracer = new THREE.Line(tracerGeo, new THREE.LineBasicMaterial({
+      color: 0xffe9a8, transparent: true, opacity: 0.9,
+    }));
+    this.tracer.visible = false;
+    this.tracer.frustumCulled = false;
+    scene.add(this.tracer);
+    this.tracerTimer = 0;
   }
 
-  // Spawn a hostile gunman at a position. Returns the ped record.
-  // The spawn point is nudged to clear ground — an enemy entombed inside
-  // a container or a building could never be seen or shot.
-  spawnEnemy(game, x, z) {
-    const spot = this._clearSpot(game, x, z);
-    const ped = game.peds._makePed(spot.x, spot.z);
-    ped.isEnemy = true;
-    ped.health = 100;
-    ped.state = 'guard';
-    ped.shootTimer = 1 + Math.random();
-    ped.target = { x, z };
-    // Enemies wear dark red — readable as hostile at a glance.
-    ped.group.children[0].material = new THREE.MeshStandardMaterial({ color: 0x8c1d18, roughness: 0.9 });
-    game.peds.peds.push(ped);
-    // Floating health bar (two thin quads, billboarded in update).
-    const barBg = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.6, 0.18),
-      new THREE.MeshBasicMaterial({ color: 0x222222, depthTest: false }),
-    );
-    barBg.renderOrder = 10;
-    const barFg = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.5, 0.12),
-      new THREE.MeshBasicMaterial({ color: 0xff3333, depthTest: false }),
-    );
-    barFg.renderOrder = 11;
-    barBg.position.y = 2.4;
-    barFg.position.y = 2.4;
-    ped.group.add(barBg, barFg);
-    ped.healthBar = barFg;
-    ped.healthBarBg = barBg;
-    this.enemies.push(ped);
-    return ped;
+  get canFire() {
+    return this.cooldown <= 0 && this.ammo > 0;
   }
 
-  // Find clear ground near (x, z): outside every building/container
-  // collider, so a spawned enemy is always visible and hittable.
-  _clearSpot(game, x, z) {
-    const fits = (px, pz) => {
-      for (const c of game.city.colliders) {
-        if (px > c.minX - 1 && px < c.maxX + 1 && pz > c.minZ - 1 && pz < c.maxZ + 1) return false;
-      }
-      return true;
-    };
-    if (fits(x, z)) return { x, z };
-    for (let r = 2; r <= 14; r += 2) {
-      for (let a = 0; a < 8; a++) {
-        const px = x + Math.cos((a / 8) * Math.PI * 2) * r;
-        const pz = z + Math.sin((a / 8) * Math.PI * 2) * r;
-        if (fits(px, pz)) return { x: px, z: pz };
-      }
-    }
-    return { x, z };
+  reload() {
+    if (this.reserve <= 0 || this.ammo >= CONFIG.pistolMag) return false;
+    const need = CONFIG.pistolMag - this.ammo;
+    const take = Math.min(need, this.reserve);
+    this.ammo += take;
+    this.reserve -= take;
+    this.cooldown = Math.max(this.cooldown, 0.5);
+    return true;
   }
 
-  clearEnemies(game) {
-    for (const e of this.enemies) {
-      game.peds.peds.splice(game.peds.peds.indexOf(e), 1);
-      game.scene.remove(e.group);
-    }
-    this.enemies = [];
-  }
+  // Fire from origin along dir. targets: enemy meshes. solids: building meshes.
+  // Returns the enemy hit (or null).
+  shoot(origin, dir, targets, solids) {
+    if (!this.canFire) return null;
+    this.ammo--;
+    this.cooldown = CONFIG.pistolFireInterval;
+    this.hooks.onShoot?.();
 
-  aliveEnemies() {
-    return this.enemies.filter((e) => e.state !== 'down');
-  }
+    this.raycaster.set(origin, dir);
+    this.raycaster.far = CONFIG.pistolRange;
+    const hits = this.raycaster.intersectObjects([...targets, ...solids], false);
+    const end = hits.length > 0
+      ? hits[0].point.clone()
+      : origin.clone().addScaledVector(dir, CONFIG.pistolRange);
 
-  // Player attacks: punch if a target is close, otherwise fire the pistol.
-  tryAttack(game) {
-    const player = game.player;
-    if (this.cooldown > 0 || player.dead) return;
-    // Melee first: anyone within punch range gets a fist.
-    const victim = game.peds.nearest(player.pos.x, player.pos.z, CONFIG.player.punchRange);
-    if (victim && !victim.isEnemy) {
-      this.cooldown = 0.35;
-      player.punchTimer = 0.25;
-      game.sound.punch();
-      game.particles.blood(victim.pos.x, 1.2, victim.pos.z);
-      const wentDown = game.peds.hit(victim, CONFIG.player.punchDamage, game);
-      game.wanted.commit(wentDown ? 'killPedestrian' : 'hitPedestrian', game);
-      game.peds.scare(player.pos.x, player.pos.z, 25);
-      game.chaosAt = { x: player.pos.x, z: player.pos.z, t: game.time };
-      return;
-    }
-    if (victim && victim.isEnemy) {
-      this.cooldown = 0.35;
-      player.punchTimer = 0.25;
-      game.sound.punch();
-      const wentDown = game.peds.hit(victim, CONFIG.player.punchDamage, game);
-      if (wentDown) game.missions?.onEnemyDown?.(victim);
-      return;
-    }
-    // Pistol: fire along the camera's horizontal look direction from the
-    // muzzle at chest height. (A screen-centre ray from the high follow
-    // camera dives into the ground metres ahead; the horizontal ray aims
-    // where the player is looking, like a real third-person shooter.)
-    if (player.ammo <= 0) {
-      game.sound.uiClick();
-      player.reload(game);
-      return;
-    }
-    this.cooldown = 0.22;
-    player.ammo -= 1;
-    game.sound.gunshot();
-    const muzzle = player.pos.clone().add(new THREE.Vector3(0, 1.4, 0));
-    game.particles.muzzle(muzzle.x, muzzle.y, muzzle.z);
-    const camera = game.cameraRig.camera;
-    const dir = new THREE.Vector3();
-    camera.getWorldDirection(dir);
-    dir.y = 0;
-    dir.normalize();
-    const origin = muzzle.clone();
-    let bestDist = CONFIG.player.pistolRange;
-    let hitPed = null;
-    for (const p of game.peds.peds) {
-      if (p.state === 'down') continue;
-      const toPed = new THREE.Vector3(p.pos.x - origin.x, 1.2 - origin.y, p.pos.z - origin.z);
-      const along = toPed.dot(dir);
-      if (along < 0 || along > bestDist) continue;
-      const closest = origin.clone().add(dir.clone().multiplyScalar(along));
-      const perp = Math.hypot(closest.x - p.pos.x, closest.y - 1.2, closest.z - p.pos.z);
-      if (perp < 0.9) {
-        bestDist = along;
-        hitPed = p;
+    // Muzzle flash at the gun, tracer to the impact, sparks on the hit.
+    this.flash.position.copy(origin).addScaledVector(dir, 0.5);
+    this.flash.lookAt(end);
+    this.flash.visible = true;
+    this.flashTimer = 0.25;
+    const pos = this.tracer.geometry.attributes.position;
+    pos.setXYZ(0, origin.x, origin.y, origin.z);
+    pos.setXYZ(1, end.x, end.y, end.z);
+    pos.needsUpdate = true;
+    this.tracer.visible = true;
+    this.tracerTimer = 0.3;
+
+    let hitEnemy = null;
+    if (hits.length > 0) {
+      const hit = hits[0];
+      const enemy = hit.object.userData.enemy;
+      if (enemy && enemy.alive) {
+        hitEnemy = enemy;
+        this.particles.burst(end, 0xff5040, 10, 5, 0.45);
+        this.hooks.onDamageNumber?.(end, CONFIG.pistolDamage);
+      } else {
+        this.particles.burst(end, 0xffd76a, 8, 4, 0.4);
       }
     }
-    // Building walls block the shot.
-    for (const c of this.city.colliders) {
-      const t = rayHitsBox(origin, dir, c, bestDist);
-      if (t !== null && t < bestDist) {
-        bestDist = t;
-        hitPed = null;
-      }
-    }
-    const hitPoint = origin.clone().add(dir.clone().multiplyScalar(bestDist));
-    this._spawnTracer(muzzle, hitPoint);
-    if (hitPed) {
-      game.particles.blood(hitPed.pos.x, 1.3, hitPed.pos.z);
-      game.hud.showDamageNumber(CONFIG.player.pistolDamage);
-      const wentDown = game.peds.hit(hitPed, CONFIG.player.pistolDamage, game);
-      if (!hitPed.isEnemy) {
-        game.wanted.commit(wentDown ? 'killPedestrian' : 'shootWitnessed', game);
-        game.peds.scare(player.pos.x, player.pos.z, 30);
-      } else if (wentDown) {
-        game.missions?.onEnemyDown?.(hitPed);
-      }
-    } else if (bestDist < CONFIG.player.pistolRange - 0.5) {
-      game.particles.sparks(hitPoint.x, hitPoint.y, hitPoint.z);
-    }
-    game.chaosAt = { x: player.pos.x, z: player.pos.z, t: game.time };
-    if (!hitPed || !hitPed.isEnemy) game.wanted.commit('shootWitnessed', game);
+    return hitEnemy;
   }
 
-  _spawnTracer(from, to) {
-    const geo = new THREE.BufferGeometry().setFromPoints([from, to]);
-    const line = new THREE.Line(
-      geo,
-      new THREE.LineBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.9 }),
-    );
-    this.scene.add(line);
-    this.tracers.push({ line, life: 0.15 });
+  // Draw an enemy tracer (their shot at the player).
+  enemyShot(from, to) {
+    const pos = this.tracer.geometry.attributes.position;
+    pos.setXYZ(0, from.x, from.y, from.z);
+    pos.setXYZ(1, to.x, to.y, to.z);
+    pos.needsUpdate = true;
+    this.tracer.visible = true;
+    this.tracerTimer = 0.15;
+    this.particles.burst(to, 0xffd76a, 5, 3, 0.3);
   }
 
-  update(dt, game) {
+  update(dt) {
     this.cooldown = Math.max(0, this.cooldown - dt);
-    // Fade tracers out fast.
-    for (let i = this.tracers.length - 1; i >= 0; i--) {
-      const tr = this.tracers[i];
-      tr.life -= dt;
-      if (tr.life <= 0) {
-        this.scene.remove(tr.line);
-        tr.line.geometry.dispose();
-        tr.line.material.dispose();
-        this.tracers.splice(i, 1);
-      }
+    if (this.flashTimer > 0) {
+      this.flashTimer -= dt;
+      if (this.flashTimer <= 0) this.flash.visible = false;
     }
-    // Enemy AI: stand ground and shoot at the player in range.
-    const player = game.player;
-    for (const e of this.enemies) {
-      if (e.state === 'down') continue;
-      // Billboard the health bar toward the camera.
-      if (e.healthBar) {
-        e.healthBar.lookAt(game.cameraRig.camera.position);
-        e.healthBarBg.lookAt(game.cameraRig.camera.position);
-        const frac = Math.max(0, e.health / 100);
-        e.healthBar.scale.x = frac;
-        e.healthBar.position.x = -(1 - frac) * 0.75;
-      }
-      const dist = Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z);
-      if (dist > 55 || player.dead) continue;
-      // Face the player.
-      e.angle = Math.atan2(player.pos.x - e.pos.x, player.pos.z - e.pos.z);
-      e.group.rotation.y = e.angle;
-      e.shootTimer -= dt;
-      if (e.shootTimer <= 0 && dist < 45) {
-        e.shootTimer = 1.1 + Math.random() * 0.9;
-        game.sound.gunshot();
-        game.particles.muzzle(e.pos.x, 1.4, e.pos.z);
-        const from = new THREE.Vector3(e.pos.x, 1.4, e.pos.z);
-        const to = player.pos.clone().add(new THREE.Vector3(0, 1.2, 0));
-        this._spawnTracer(from, to);
-        // Hit chance falls with distance; the player can dodge behind cover.
-        const hitChance = Math.max(0.12, 0.55 - dist * 0.008);
-        if (Math.random() < hitChance) {
-          player.damage(7 + Math.random() * 6, game);
-          game.particles.blood(player.pos.x, 1.2, player.pos.z);
-        } else {
-          game.particles.sparks(to.x + (Math.random() - 0.5) * 2, to.y, to.z + (Math.random() - 0.5) * 2);
-        }
-      }
+    if (this.tracerTimer > 0) {
+      this.tracerTimer -= dt;
+      if (this.tracerTimer <= 0) this.tracer.visible = false;
     }
   }
-}
-
-// Slab-method ray vs AABB (y is 0..60 for buildings). Returns t or null.
-// A collider containing the ray origin (tMin ~ 0) never blocks: the muzzle
-// is at the player's chest, and a shot must not die at distance 0 because
-// the player happens to stand inside a crane's footprint.
-function rayHitsBox(origin, dir, box, maxT) {
-  let tMin = 0;
-  let tMax = maxT;
-  const axes = [
-    [origin.x, dir.x, box.minX, box.maxX],
-    [origin.y, dir.y, 0, 60],
-    [origin.z, dir.z, box.minZ, box.maxZ],
-  ];
-  for (const [o, d, lo, hi] of axes) {
-    if (Math.abs(d) < 1e-8) {
-      if (o < lo || o > hi) return null;
-    } else {
-      let t1 = (lo - o) / d;
-      let t2 = (hi - o) / d;
-      if (t1 > t2) [t1, t2] = [t2, t1];
-      tMin = Math.max(tMin, t1);
-      tMax = Math.min(tMax, t2);
-      if (tMin > tMax) return null;
-    }
-  }
-  if (tMin <= 0.01) return null;
-  return tMin;
 }

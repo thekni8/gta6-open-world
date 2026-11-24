@@ -1,195 +1,148 @@
-// HUD: health, cash, wanted stars, objective + countdown timer, speed,
-// ammo, zone label, toasts, and the mission complete/failed overlays.
-// Everything stays big and high-contrast for contact-sheet legibility.
-export class Hud {
-  constructor(game) {
-    this.game = game;
+// The HUD: health, cash, wanted stars, the weapon badge, ammo, speed,
+// the mission objective pill, toasts, the district label, the controls
+// bar, the [E] prompt and floating damage numbers. Everything sits on
+// soft dark containers so it reads against bright sky and light road.
+
+export class HUD {
+  constructor(camera, renderer) {
+    this.camera = camera;
+    this.renderer = renderer;
     this.el = {};
     for (const id of [
-      'hud', 'health-fill', 'health-text', 'cash', 'stars', 'objective-title',
-      'objective-text', 'objective-timer', 'speed', 'speed-value', 'ammo',
-      'ammo-value', 'controls-hint', 'zone-label', 'toast', 'toast-title',
-      'toast-body', 'crosshair', 'damage-flash', 'mission-overlay',
-      'mission-overlay-title', 'mission-overlay-body', 'mission-overlay-btn',
-      'busted-overlay', 'wasted-overlay', 'interact-prompt', 'hit-layer',
+      'hud', 'hp-fill', 'hp-text', 'cash-text', 'stars',
+      'obj-title', 'obj-text', 'obj-progress', 'objective-pill',
+      'toasts', 'district-name', 'district-sub',
+      'weapon-icon', 'weapon-name', 'ammo-text', 'reserve-text',
+      'speed-text', 'speed-box', 'crosshair', 'prompt', 'prompt-key',
+      'prompt-text', 'damage-layer', 'damage-flash', 'controls-bar',
+      'kills-text',
     ]) {
       this.el[id] = document.getElementById(id);
     }
-    this.zoneTimer = 0;
-    this.toastTimer = 0;
-    this.lastZone = '';
-    this.hitNumbers = []; // floating damage numbers, animated in update()
-    this.el['mission-overlay-btn']?.addEventListener('click', () => {
-      this.game.sound.ensure();
-      this.game.sound.uiClick();
-      this.hideMissionOverlay();
-      this.game.resumeAfterMissionEnd();
-    });
+    this.damageNumbers = [];
+    this.projector = new THREE.Vector3();
   }
 
-  showToast(title, body, seconds = 5) {
-    this.el['toast-title'].textContent = title;
-    this.el['toast-body'].textContent = body;
-    this.el.toast.classList.add('visible');
-    this.toastTimer = seconds;
+  show() {
+    this.el.hud.style.display = 'block';
   }
 
-  hideToast() {
-    this.toastTimer = 0;
-    this.el.toast.classList.remove('visible');
+  hide() {
+    this.el.hud.style.display = 'none';
   }
 
-  // Floating "-34" damage number near the crosshair. Animated on game
-  // time in update() — a real-time setTimeout/rAF fade vanishes unseen
-  // on a slow frame, but game time keeps the number visible for its full
-  // 0.9s at any frame rate.
-  showDamageNumber(amount) {
-    const layer = this.el['hit-layer'];
-    if (!layer) return;
+  setState(s) {
+    const hpFrac = Math.max(0, s.hp / 100);
+    this.el['hp-fill'].style.width = `${hpFrac * 100}%`;
+    this.el['hp-fill'].style.background = hpFrac > 0.5 ? '#51d96a' : hpFrac > 0.25 ? '#f2c230' : '#e84a4a';
+    this.el['hp-text'].textContent = `HP ${Math.ceil(s.hp)}`;
+    this.el['cash-text'].textContent = `$${s.cash.toLocaleString('en-US')}`;
+    let stars = '';
+    for (let i = 0; i < 5; i++) stars += i < s.stars ? '★' : '☆';
+    this.el.stars.textContent = stars;
+    this.el.stars.classList.toggle('wanted', s.stars > 0);
+    this.el['weapon-icon'].textContent = s.weaponIcon;
+    this.el['weapon-name'].textContent = s.weaponName;
+    this.el['ammo-text'].textContent = `${s.ammo} / ${s.mag}`;
+    this.el['reserve-text'].textContent = `· ${s.reserve}`;
+    this.el['kills-text'].textContent = s.kills > 0 ? `☠ ${s.kills}` : '';
+    if (s.driving) {
+      this.el['speed-box'].style.display = 'block';
+      this.el['speed-text'].textContent = `${Math.round(s.speedKmh)}`;
+    } else {
+      this.el['speed-box'].style.display = 'none';
+    }
+    this.el.crosshair.style.display = s.driving ? 'none' : 'block';
+  }
+
+  setObjective(title, text, progress = '') {
+    this.el['objective-pill'].style.display = title ? 'block' : 'none';
+    this.el['obj-title'].textContent = title || '';
+    this.el['obj-text'].textContent = text || '';
+    this.el['obj-progress'].textContent = progress || '';
+  }
+
+  setDistrict(name, sub = '') {
+    this.el['district-name'].textContent = name;
+    this.el['district-sub'].textContent = sub;
+  }
+
+  clearToasts() {
+    this.el.toasts.innerHTML = '';
+  }
+
+  toast(title, text, ms = 4200) {
     const div = document.createElement('div');
-    div.className = 'hit-number';
-    div.textContent = `-${amount}`;
-    const ox = (Math.random() - 0.5) * 90;
-    const oy = (Math.random() - 0.5) * 50 - 30;
-    div.style.left = `calc(50% + ${ox}px)`;
-    div.style.top = `calc(50% + ${oy}px)`;
-    layer.appendChild(div);
-    this.hitNumbers.push({ el: div, life: 0.9, max: 0.9 });
+    div.className = 'toast';
+    div.innerHTML = `<div class="toast-title"></div><div class="toast-text"></div>`;
+    div.querySelector('.toast-title').textContent = title;
+    div.querySelector('.toast-text').textContent = text;
+    this.el.toasts.appendChild(div);
+    while (this.el.toasts.children.length > 3) this.el.toasts.removeChild(this.el.toasts.firstChild);
+    setTimeout(() => {
+      div.classList.add('toast-out');
+      setTimeout(() => div.remove(), 500);
+    }, ms);
   }
 
-  showZone(name) {
-    if (name === this.lastZone) return;
-    this.lastZone = name;
-    this.el['zone-label'].textContent = name;
-    this.el['zone-label'].classList.add('visible');
-    this.zoneTimer = 2.6;
+  showPrompt(key, text, screenX, screenY) {
+    const p = this.el.prompt;
+    p.style.display = 'flex';
+    p.style.left = `${screenX}px`;
+    p.style.top = `${screenY}px`;
+    this.el['prompt-key'].textContent = key;
+    this.el['prompt-text'].textContent = text;
   }
 
-  showMissionComplete(def) {
-    this.el['mission-overlay-title'].textContent = 'MISSION COMPLETE';
-    this.el['mission-overlay-title'].style.color = '#7be382';
-    this.el['mission-overlay-body'].innerHTML =
-      `<strong>${def.title}</strong><br>${def.outro}<br><br>` +
-      `<span class="reward">+$${def.reward.toLocaleString()}</span>`;
-    this.el['mission-overlay-btn'].textContent = 'Continue';
-    this.el['mission-overlay'].classList.add('visible');
-  }
-
-  showMissionFailed(def, reason) {
-    this.el['mission-overlay-title'].textContent = 'MISSION FAILED';
-    this.el['mission-overlay-title'].style.color = '#ff6b6b';
-    this.el['mission-overlay-body'].innerHTML =
-      `<strong>${def.title}</strong><br>${reason}<br><br>Press Continue to retry the mission.`;
-    this.el['mission-overlay-btn'].textContent = 'Retry mission';
-    this.el['mission-overlay'].classList.add('visible');
-  }
-
-  hideMissionOverlay() {
-    this.el['mission-overlay'].classList.remove('visible');
-  }
-
-  showBusted() {
-    this.el['busted-overlay'].classList.add('visible');
-  }
-
-  showWasted() {
-    this.el['wasted-overlay'].classList.add('visible');
-  }
-
-  hideEndOverlays() {
-    this.el['busted-overlay'].classList.remove('visible');
-    this.el['wasted-overlay'].classList.remove('visible');
+  hidePrompt() {
+    this.el.prompt.style.display = 'none';
   }
 
   flashDamage() {
     const f = this.el['damage-flash'];
-    f.classList.add('visible');
-    setTimeout(() => f.classList.remove('visible'), 220);
+    f.style.opacity = '0.45';
+    setTimeout(() => { f.style.opacity = '0'; }, 120);
   }
 
-  formatTime(seconds) {
-    const s = Math.max(0, Math.ceil(seconds));
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  damageNumber(worldPos, amount) {
+    const div = document.createElement('div');
+    div.className = 'damage-number';
+    div.textContent = `-${amount}`;
+    this.el['damage-layer'].appendChild(div);
+    this.damageNumbers.push({ el: div, pos: worldPos.clone(), life: 0.9 });
+  }
+
+  // Project a world point to screen pixels. Returns null behind camera.
+  project(worldPos) {
+    this.projector.copy(worldPos).project(this.camera);
+    if (this.projector.z > 1) return null;
+    const w = this.renderer.domElement.clientWidth;
+    const h = this.renderer.domElement.clientHeight;
+    return {
+      x: (this.projector.x * 0.5 + 0.5) * w,
+      y: (-this.projector.y * 0.5 + 0.5) * h,
+    };
   }
 
   update(dt) {
-    const game = this.game;
-    const player = game.player;
-    // Timers for transient labels.
-    if (this.zoneTimer > 0) {
-      this.zoneTimer -= dt;
-      if (this.zoneTimer <= 0) this.el['zone-label'].classList.remove('visible');
-    }
-    if (this.toastTimer > 0) {
-      this.toastTimer -= dt;
-      if (this.toastTimer <= 0) this.el.toast.classList.remove('visible');
-    }
-    // Damage numbers rise and fade on game time.
-    for (let i = this.hitNumbers.length - 1; i >= 0; i--) {
-      const h = this.hitNumbers[i];
-      h.life -= dt;
-      if (h.life <= 0) {
-        h.el.remove();
-        this.hitNumbers.splice(i, 1);
+    for (let i = this.damageNumbers.length - 1; i >= 0; i--) {
+      const d = this.damageNumbers[i];
+      d.life -= dt;
+      if (d.life <= 0) {
+        d.el.remove();
+        this.damageNumbers.splice(i, 1);
         continue;
       }
-      const t = 1 - h.life / h.max;
-      h.el.style.transform = `translateY(${(-46 * t).toFixed(1)}px)`;
-      h.el.style.opacity = h.life < 0.35 ? (h.life / 0.35).toFixed(2) : '1';
+      const p = this.project(d.pos);
+      if (!p) {
+        d.el.style.display = 'none';
+        continue;
+      }
+      d.el.style.display = 'block';
+      const rise = (0.9 - d.life) * 46;
+      d.el.style.left = `${p.x}px`;
+      d.el.style.top = `${p.y - rise}px`;
+      d.el.style.opacity = String(Math.min(1, d.life / 0.35));
     }
-    // Health.
-    const hp = Math.max(0, Math.round(player.health));
-    this.el['health-fill'].style.width = `${hp}%`;
-    this.el['health-fill'].style.background = hp > 50 ? '#7be382' : hp > 25 ? '#ffd23d' : '#ff6b6b';
-    this.el['health-text'].textContent = `${hp}`;
-    // Cash.
-    this.el.cash.textContent = `$${game.cash.toLocaleString()}`;
-    // Wanted stars: 5 big stars, filled gold up to the current level.
-    let starsHtml = '';
-    for (let i = 0; i < 5; i++) {
-      starsHtml += `<span class="star ${i < game.wanted.stars ? 'lit' : ''}">★</span>`;
-    }
-    this.el.stars.innerHTML = starsHtml;
-    // Objective + timer (always visible during a mission).
-    const mission = game.missions.active;
-    if (mission) {
-      this.el['objective-title'].textContent = `★ ${mission.def.title.toUpperCase()} — ${mission.def.giver}`;
-      this.el['objective-text'].textContent = game.missions.objectiveText();
-      this.el['objective-timer'].textContent = this.formatTime(mission.timeLeft);
-      this.el['objective-timer'].classList.toggle('urgent', mission.timeLeft < 30);
-      this.el['objective-timer'].style.display = 'block';
-    } else {
-      const next = game.missions.nextMission();
-      this.el['objective-title'].textContent = next ? 'FREE ROAM' : 'STORY COMPLETE';
-      this.el['objective-text'].textContent = next
-        ? `Press M to start: ${next.title} ($${next.reward}) — or explore Meridian Bay`
-        : 'You finished the story. Meridian Bay is yours — free roam forever.';
-      this.el['objective-timer'].style.display = 'none';
-    }
-    // Speed + ammo.
-    if (player.inCar && player.car) {
-      this.el.speed.style.display = 'flex';
-      this.el['speed-value'].textContent = `${Math.round(player.car.speedKmh())}`;
-      this.el.ammo.style.display = 'none';
-    } else {
-      this.el.speed.style.display = 'none';
-      this.el.ammo.style.display = 'flex';
-      this.el['ammo-value'].textContent = `${player.ammo} / ${player.reserve}`;
-    }
-    // Crosshair only on foot while playing.
-    this.el.crosshair.style.display = (!player.inCar && game.state === 'playing') ? 'block' : 'none';
-    // Interaction prompt: [E] Enter car when a car is in reach on foot.
-    const prompt = this.el['interact-prompt'];
-    if (prompt) {
-      const nearCar = !player.inCar && game.state === 'playing' && (
-        game.traffic.nearestParked(player.pos.x, player.pos.z, 4.5)
-        || game.traffic.nearestMoving(player.pos.x, player.pos.z, 4.5)
-        || game.police.nearestCar(player.pos.x, player.pos.z, 4.5)
-      );
-      prompt.style.display = nearCar ? 'flex' : 'none';
-    }
-    // Zone label on district change.
-    const zone = game.currentZone();
-    this.showZone(zone);
   }
 }

@@ -1,170 +1,144 @@
-// Pedestrians: capsule people strolling the sidewalks, chatting in place,
-// and fleeing when shots ring out or a car bears down on them.
+// Pedestrians: capsule walkers strolling the sidewalks, pausing at corners,
+// and fleeing when shots ring out or a car mounts the curb.
+
 import { CONFIG } from '../config.js';
+import { makeRng } from '../util/random.js';
+import { ROAD_LINES, BLOCK_CENTERS, resolveCircle } from '../world/city.js';
 
-const SHIRT_COLORS = [0xe8e8e8, 0x3d7dd9, 0xd94f3d, 0x3da35d, 0xe8a33d, 0x8a5fc0, 0xef8fb0, 0x2b2f36, 0xffd166, 0x7fb8c9];
-const SKIN_COLORS = [0xf2c9a0, 0xc98d5a, 0x8a5a34, 0xf7d7b5, 0xa06a3c];
+const SHIRTS = [0xe8c547, 0x4f7ec9, 0xc94f4f, 0x7fb069, 0xe07b39, 0x8e6cc9, 0xd9d9d9, 0x4fb0c9];
 
-export class Pedestrians {
-  constructor(scene, city, rng) {
+export class PedestrianManager {
+  constructor(scene, colliders) {
     this.scene = scene;
-    this.city = city;
-    this.rng = rng;
+    this.colliders = colliders;
     this.peds = [];
-    this.bodyGeo = new THREE.CapsuleGeometry(0.32, 0.75, 3, 8);
-    this.headGeo = new THREE.SphereGeometry(0.24, 10, 8);
-    this.legGeo = new THREE.BoxGeometry(0.16, 0.55, 0.2);
+    this.rng = makeRng(4242);
   }
 
   spawn(count) {
     for (let i = 0; i < count; i++) {
-      const p = this._makePed();
-      if (p) this.peds.push(p);
+      const bx = this.rng.pick(BLOCK_CENTERS);
+      const bz = this.rng.pick(BLOCK_CENTERS);
+      this.spawnAt(bx + this.rng.range(-22, 22), bz + this.rng.range(-22, 22));
     }
   }
 
-  _makePed(x = null, z = null) {
-    const rng = this.rng;
-    let px = x;
-    let pz = z;
-    if (px === null) {
-      // Start on a sidewalk: just off a road line.
-      const line = rng.pick(CONFIG.world.roadLines);
-      const along = rng.range(-210, 210);
-      if (rng.chance(0.5)) { px = along; pz = line + rng.pick([-9, 9]); }
-      else { px = line + rng.pick([-9, 9]); pz = along; }
-    }
+  spawnAt(x, z) {
     const group = new THREE.Group();
-    const shirt = new THREE.MeshStandardMaterial({ color: rng.pick(SHIRT_COLORS), roughness: 0.9 });
-    const skin = new THREE.MeshStandardMaterial({ color: rng.pick(SKIN_COLORS), roughness: 0.8 });
-    const pants = new THREE.MeshStandardMaterial({ color: rng.pick([0x2b2f36, 0x3d5a80, 0x6b705c, 0x4a4a4a]), roughness: 0.9 });
-    const body = new THREE.Mesh(this.bodyGeo, shirt);
-    body.position.y = 1.05;
-    body.castShadow = true;
-    const head = new THREE.Mesh(this.headGeo, skin);
-    head.position.y = 1.78;
+    const shirt = new THREE.MeshLambertMaterial({ color: this.rng.pick(SHIRTS) });
+    const pants = new THREE.MeshLambertMaterial({ color: 0x33363c });
+    const skin = new THREE.MeshLambertMaterial({ color: this.rng.pick([0xc98d64, 0x8a5a3b, 0xe8b48a, 0x6b4226]) });
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.55, 4, 8), shirt);
+    torso.position.y = 1.12;
+    torso.castShadow = true;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 10, 8), skin);
+    head.position.y = 1.82;
     head.castShadow = true;
-    const legL = new THREE.Mesh(this.legGeo, pants);
-    legL.position.set(-0.14, 0.3, 0);
-    const legR = new THREE.Mesh(this.legGeo, pants);
-    legR.position.set(0.14, 0.3, 0);
-    group.add(body, head, legL, legR);
-    group.position.set(px, 0, pz);
+    const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.08, 0.7, 6), pants);
+    legL.position.set(-0.14, 0.38, 0);
+    const legR = legL.clone();
+    legR.position.x = 0.14;
+    group.add(torso, head, legL, legR);
+    group.position.set(x, 0, z);
     this.scene.add(group);
-    return {
+    const ped = {
       group, legL, legR,
-      pos: new THREE.Vector3(px, 0, pz),
-      angle: rng.range(0, Math.PI * 2),
-      speed: rng.range(1.1, 1.9),
-      target: this._newTarget(px, pz),
-      state: 'walk', // walk | flee | down
-      health: 100,
-      fleeTimer: 0,
-      walkPhase: rng.range(0, Math.PI * 2),
-      isEnemy: false,
+      x, z,
+      heading: this.rng.range(0, Math.PI * 2),
+      speed: this.rng.range(1.1, 1.9),
+      target: null,
+      flee: 0,
+      fleeDir: { x: 0, z: 0 },
+      phase: this.rng.range(0, 6),
+      alive: true,
     };
+    this.pickTarget(ped);
+    this.peds.push(ped);
+    return ped;
   }
 
-  _newTarget(x, z) {
-    // Pick a nearby sidewalk point: walk along the current road, then turn.
-    const line = this.city.nearestRoadPoint(x, z);
-    const side = this.rng.pick([-9, 9]);
-    if (line.axis === 'x') {
-      return { x: x + this.rng.range(-70, 70), z: line.z + side };
-    }
-    return { x: line.x + side, z: z + this.rng.range(-70, 70) };
+  // Pick a new sidewalk waypoint near a block edge.
+  pickTarget(ped) {
+    const bx = this.rng.pick(BLOCK_CENTERS);
+    const bz = this.rng.pick(BLOCK_CENTERS);
+    const edge = this.rng.int(0, 3);
+    const t = this.rng.range(-22, 22);
+    if (edge === 0) ped.target = { x: bx + t, z: bz - 24 };
+    else if (edge === 1) ped.target = { x: bx + t, z: bz + 24 };
+    else if (edge === 2) ped.target = { x: bx - 24, z: bz + t };
+    else ped.target = { x: bx + 24, z: bz + t };
   }
 
-  // Everyone near a disturbance runs away from it.
-  scare(x, z, radius = 40) {
-    for (const p of this.peds) {
-      if (p.state === 'down') continue;
-      const d = Math.hypot(p.pos.x - x, p.pos.z - z);
-      if (d < radius) {
-        p.state = 'flee';
-        p.fleeTimer = 3 + Math.random() * 2;
-        const a = Math.atan2(p.pos.x - x, p.pos.z - z);
-        p.target = {
-          x: p.pos.x + Math.sin(a) * 40,
-          z: p.pos.z + Math.cos(a) * 40,
-        };
+  scare(point, radius = 55) {
+    for (const ped of this.peds) {
+      const dx = ped.x - point.x;
+      const dz = ped.z - point.z;
+      const d = Math.hypot(dx, dz);
+      if (d < radius && d > 0.1) {
+        ped.flee = 4;
+        ped.fleeDir = { x: dx / d, z: dz / d };
       }
     }
   }
 
-  update(dt, game) {
-    for (const p of this.peds) {
-      if (p.state === 'down') continue;
-      // Enemies hold their ground and shoot (weapons.update aims them);
-      // only civilians stroll and flee.
-      if (p.isEnemy) continue;
-      if (p.state === 'flee') {
-        p.fleeTimer -= dt;
-        if (p.fleeTimer <= 0) {
-          p.state = 'walk';
-          p.target = this._newTarget(p.pos.x, p.pos.z);
+  update(dt) {
+    for (const ped of this.peds) {
+      if (!ped.alive) continue;
+      let mx = 0;
+      let mz = 0;
+      let speed = ped.speed;
+      if (ped.flee > 0) {
+        ped.flee -= dt;
+        mx = ped.fleeDir.x;
+        mz = ped.fleeDir.z;
+        speed = 4.2;
+      } else if (ped.target) {
+        const dx = ped.target.x - ped.x;
+        const dz = ped.target.z - ped.z;
+        const d = Math.hypot(dx, dz);
+        if (d < 1.5) {
+          this.pickTarget(ped);
+        } else {
+          mx = dx / d;
+          mz = dz / d;
         }
       }
-      const dx = p.target.x - p.pos.x;
-      const dz = p.target.z - p.pos.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist < 1.5) {
-        p.target = this._newTarget(p.pos.x, p.pos.z);
-        continue;
+      if (mx !== 0 || mz !== 0) {
+        ped.heading = Math.atan2(mx, mz);
+        ped.group.rotation.y = ped.heading;
+        ped.x += mx * speed * dt;
+        ped.z += mz * speed * dt;
+        const pos = ped.group.position;
+        pos.x = ped.x;
+        pos.z = ped.z;
+        resolveCircle(pos, 0.45, this.colliders);
+        ped.x = pos.x;
+        ped.z = pos.z;
+        ped.phase += dt * speed * 2.4;
+        const swing = Math.sin(ped.phase) * 0.5;
+        ped.legL.rotation.x = swing;
+        ped.legR.rotation.x = -swing;
       }
-      const targetAngle = Math.atan2(dx, dz);
-      let diff = targetAngle - p.angle;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      p.angle += Math.max(-3 * dt, Math.min(3 * dt, diff));
-      const speed = p.state === 'flee' ? p.speed * 2.6 : p.speed;
-      const prevX = p.pos.x;
-      const prevZ = p.pos.z;
-      p.pos.x += Math.sin(p.angle) * speed * dt;
-      p.pos.z += Math.cos(p.angle) * speed * dt;
-      if (this.city.collideCircle(p.pos, 0.5)) {
-        // Bumped into a building: pick a new target instead of hugging walls.
-        p.pos.x = prevX;
-        p.pos.z = prevZ;
-        p.target = this._newTarget(p.pos.x, p.pos.z);
-      }
-      p.group.position.copy(p.pos);
-      p.group.rotation.y = p.angle;
-      // Walk-cycle leg swing.
-      p.walkPhase += dt * speed * 4.2;
-      const swing = Math.sin(p.walkPhase) * 0.55;
-      p.legL.rotation.x = swing;
-      p.legR.rotation.x = -swing;
-      // A car bearing down scatters pedestrians.
-      if (p.state !== 'flee' && game.player.inCar && game.player.car) {
-        const car = game.player.car;
-        if (Math.abs(car.speed) > 6 && Math.hypot(car.pos.x - p.pos.x, car.pos.z - p.pos.z) < 9) {
-          this.scare(car.pos.x, car.pos.z, 12);
-        }
-      }
+      ped.x = Math.max(-330, Math.min(420, ped.x));
+      ped.z = Math.max(-330, Math.min(335, ped.z));
     }
   }
 
-  // Damage a pedestrian (shot or run over). Returns true if they went down.
-  hit(ped, damage, game) {
-    ped.health -= damage;
-    if (ped.health <= 0 && ped.state !== 'down') {
-      ped.state = 'down';
-      ped.group.rotation.x = -Math.PI / 2;
-      ped.group.position.y = 0.35;
-      return true;
-    }
-    return false;
+  positions() {
+    return this.peds.filter((p) => p.alive).map((p) => ({ x: p.x, z: p.z }));
   }
 
-  nearest(x, z, maxDist, { enemiesOnly = false } = {}) {
+  // The nearest ped within radius, for melee / collision checks.
+  nearestTo(x, z, radius) {
     let best = null;
-    let bestD = maxDist;
-    for (const p of this.peds) {
-      if (p.state === 'down') continue;
-      if (enemiesOnly && !p.isEnemy) continue;
-      const d = Math.hypot(p.pos.x - x, p.pos.z - z);
-      if (d < bestD) { bestD = d; best = p; }
+    let bestD = radius;
+    for (const ped of this.peds) {
+      if (!ped.alive) continue;
+      const d = Math.hypot(ped.x - x, ped.z - z);
+      if (d < bestD) {
+        bestD = d;
+        best = ped;
+      }
     }
     return best;
   }

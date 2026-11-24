@@ -1,81 +1,81 @@
-// Menus: start screen (New Game / Continue / Controls), pause menu, and
-// the controls help panel. All DOM overlays above the 3D view.
+// Menus: the start screen, pause, mission complete / failed, controls
+// help and the full-map overlay. Plain DOM over the 3D canvas.
+
+import { INTRO_TEXT } from '../missions/story.js';
+
 export class Menus {
-  constructor(game) {
-    this.game = game;
-    this.el = {};
-    for (const id of [
-      'start-screen', 'btn-new', 'btn-continue', 'btn-controls', 'save-info',
-      'pause-menu', 'btn-resume', 'btn-restart-mission', 'btn-pause-controls',
-      'btn-music', 'btn-quit', 'help-panel', 'btn-close-help', 'btn-close-help-2',
-      'mission-list',
-    ]) {
-      this.el[id] = document.getElementById(id);
-    }
-    this.el['btn-new'].addEventListener('click', () => {
-      this.game.sound.ensure();
-      this.game.sound.uiClick();
-      this.game.newGame();
-    });
-    this.el['btn-continue'].addEventListener('click', () => {
-      this.game.sound.ensure();
-      this.game.sound.uiClick();
-      this.game.continueGame();
-    });
-    this.el['btn-controls'].addEventListener('click', () => this.showHelp(true));
-    this.el['btn-close-help'].addEventListener('click', () => this.showHelp(false));
-    this.el['btn-close-help-2'].addEventListener('click', () => this.showHelp(false));
-    this.el['btn-resume'].addEventListener('click', () => this.game.togglePause(false));
-    this.el['btn-restart-mission'].addEventListener('click', () => {
-      this.game.sound.uiClick();
-      this.game.restartMission();
-    });
-    this.el['btn-pause-controls'].addEventListener('click', () => this.showHelp(true));
-    this.el['btn-music'].addEventListener('click', () => {
-      const on = this.game.sound.toggleMusic();
-      this.el['btn-music'].textContent = on ? 'Music: On' : 'Music: Off';
-    });
-    this.el['btn-quit'].addEventListener('click', () => {
-      this.game.sound.uiClick();
-      this.game.quitToMenu();
-    });
+  constructor(hooks) {
+    this.hooks = hooks; // { onNewGame, onContinue, onResume, onRestartMission, onQuitToMenu }
+    this.mapOpen = false;
+    this.helpOpen = false;
+
+    this.startEl = document.getElementById('start-screen');
+    this.pauseEl = document.getElementById('pause-screen');
+    this.completeEl = document.getElementById('mission-complete');
+    this.failEl = document.getElementById('mission-failed');
+    this.helpEl = document.getElementById('help-screen');
+    this.mapEl = document.getElementById('map-overlay');
+
+    document.getElementById('btn-new-game').addEventListener('click', () => this.hooks.onNewGame());
+    document.getElementById('btn-continue').addEventListener('click', () => this.hooks.onContinue());
+    document.getElementById('btn-controls').addEventListener('click', () => this.showHelp(true));
+    document.getElementById('btn-resume').addEventListener('click', () => this.hooks.onResume());
+    document.getElementById('btn-restart-mission').addEventListener('click', () => this.hooks.onRestartMission());
+    document.getElementById('btn-quit-menu').addEventListener('click', () => this.hooks.onQuitToMenu());
+    document.getElementById('btn-complete-continue').addEventListener('click', () => this.hooks.onResume());
+    document.getElementById('btn-fail-retry').addEventListener('click', () => this.hooks.onRestartMission());
+    document.getElementById('btn-fail-menu').addEventListener('click', () => this.hooks.onQuitToMenu());
+    document.getElementById('btn-help-close').addEventListener('click', () => this.showHelp(false));
+    document.getElementById('btn-map-close').addEventListener('click', () => this.showMap(false));
+
+    document.getElementById('start-subtitle').textContent = INTRO_TEXT.subtitle;
+    document.getElementById('start-kai').textContent = INTRO_TEXT.kai;
+    document.getElementById('start-kings').textContent = INTRO_TEXT.kings;
+    document.getElementById('start-vesper').textContent = INTRO_TEXT.vesper;
   }
 
-  showStart(hasSave, save) {
-    this.el['start-screen'].classList.add('visible');
-    this.el['pause-menu'].classList.remove('visible');
-    this.el['btn-continue'].style.display = hasSave ? 'block' : 'none';
-    if (hasSave && save) {
-      const done = (save.missionsDone || []).length;
-      this.el['save-info'].textContent =
-        `Continue — ${done}/5 missions done · $${(save.cash || 0).toLocaleString()} cash`;
-    } else {
-      this.el['save-info'].textContent = 'No save yet — start a new game.';
-    }
-    this._renderMissionList(save);
-  }
-
-  hideStart() {
-    this.el['start-screen'].classList.remove('visible');
+  showStart(canContinue) {
+    this.hideAll();
+    this.startEl.style.display = 'flex';
+    document.getElementById('btn-continue').style.display = canContinue ? 'block' : 'none';
   }
 
   showPause() {
-    this.el['pause-menu'].classList.add('visible');
+    this.hideAll();
+    this.pauseEl.style.display = 'flex';
   }
 
-  hidePause() {
-    this.el['pause-menu'].classList.remove('visible');
+  showComplete(mission, cash) {
+    this.hideAll();
+    document.getElementById('complete-title').textContent = `MISSION ${mission.id} COMPLETE`;
+    document.getElementById('complete-name').textContent = mission.title;
+    document.getElementById('complete-outro').textContent = mission.outro;
+    document.getElementById('complete-reward').textContent = `+$${mission.reward.toLocaleString('en-US')} — Cash $${cash.toLocaleString('en-US')}`;
+    this.completeEl.style.display = 'flex';
   }
 
-  showHelp(show) {
-    this.el['help-panel'].classList.toggle('visible', show);
+  showFailed(mission, reason) {
+    this.hideAll();
+    document.getElementById('fail-title').textContent = mission ? `MISSION ${mission.id} FAILED` : 'BUSTED';
+    document.getElementById('fail-reason').textContent = reason;
+    this.failEl.style.display = 'flex';
   }
 
-  _renderMissionList(save) {
-    const done = new Set((save && save.missionsDone) || []);
-    const titles = ['First Delivery', 'Borrowed Wheels', 'Heat Run', 'Port Ambush', 'The Choice'];
-    this.el['mission-list'].innerHTML = titles.map((t, i) =>
-      `<div class="mission-row ${done.has(i) ? 'done' : ''}"><span>${done.has(i) ? '✓' : '○'}</span> ${i + 1}. ${t}</div>`,
-    ).join('');
+  showHelp(open) {
+    this.helpOpen = open;
+    this.helpEl.style.display = open ? 'flex' : 'none';
+  }
+
+  showMap(open) {
+    this.mapOpen = open;
+    this.mapEl.style.display = open ? 'flex' : 'none';
+  }
+
+  hideAll() {
+    for (const el of [this.startEl, this.pauseEl, this.completeEl, this.failEl, this.helpEl, this.mapEl]) {
+      el.style.display = 'none';
+    }
+    this.helpOpen = false;
+    this.mapOpen = false;
   }
 }

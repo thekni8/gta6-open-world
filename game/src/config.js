@@ -1,94 +1,89 @@
-// Meridian Bay — tuning constants. One place for every number the rest of
-// the game balances against: world size, speeds, wanted heat, rewards.
+// Tuning constants for Meridian Bay: speeds, wanted thresholds, colors,
+// prices and city dimensions. One place to tune the whole game.
+
 export const CONFIG = {
-  world: {
-    half: 240,            // city ground spans -240..240 on x and z
-    roadSpacing: 56,
-    roadWidth: 12,
-    roadLines: [-196, -140, -84, -28, 28, 84, 140, 196],
-    blockHalf: 22,        // buildings live inside blocks between roads
-    seaStart: 240,        // z beyond this is open water
-    beachStart: 196,      // z beyond this is sand
-    portEdge: -196,       // x below this is the industrial port strip
-    marinaEdge: 196,      // x above this is the marina strip
-  },
-  palette: {
-    // pastel sun-soaked building colours, cycled with a seeded shuffle
-    buildings: [0xf2e3c6, 0xf6c9a0, 0xf2a65a, 0xe98d7a, 0xd98cb3, 0x9fc6e8, 0x8fd0c2, 0xb5d99c, 0xf7e08b, 0xcbb7e8, 0xf5f0e6, 0xe8b4b8],
-    downtown: [0x9fc6e8, 0xb8cfe0, 0x8fb8d8, 0xd8c9a8, 0xc9d6e3],
-    road: 0x484d55,
-    sidewalk: 0xcfc8b8,
-    grass: 0x6fbf5a,
-    sand: 0xf0dca8,
-    sea: 0x2fa8c9,
-    seaDeep: 0x1b7fa8,
-  },
-  player: {
-    walkSpeed: 6.5,
-    sprintSpeed: 10.5,
-    radius: 0.7,
-    maxHealth: 100,
-    punchDamage: 15,
-    punchRange: 2.2,
-    pistolDamage: 34,
-    pistolAmmo: 12,
-    pistolReserve: 48,
-    pistolRange: 90,
-  },
-  car: {
-    playerMaxSpeed: 40,
-    playerAccel: 22,
-    playerBrake: 34,
-    playerReverseMax: 12,
-    trafficSpeed: 11,
-    policeMaxSpeed: 46,
-    radius: 1.9,
-    maxHealth: 100,
-  },
-  wanted: {
-    // heat points per crime; stars are heat bands
-    stealCar: 25,
-    hitPedestrian: 30,
-    hitPolice: 45,
-    shootWitnessed: 20,
-    killPedestrian: 40,
-    starBands: [0, 20, 45, 70, 95, 120], // heat needed for stars 0..5
-    decayPerSecond: 1.6,   // while unseen by police
-    hideoutDecay: 14,      // per second inside the park hideout
-    seenRadius: 55,        // police "see" the player inside this range
-    bustRadius: 3.2,       // police car touching a slow on-foot player
-    bustSeconds: 1.6,
-  },
-  police: {
-    carsPerStar: [0, 1, 2, 3, 4, 5],
-    roadblockAtStars: 4,
-    spawnDistance: 70,
-    ramDamage: 8,
-  },
-  missions: {
-    rewards: [500, 800, 1200, 2000, 5000],
-    failPenalty: 0,
-  },
-  hud: {
-    minimapSize: 248,      // big and bright: legible at contact-sheet size
-  },
-  saveKey: 'meridian-bay-save-v1',
+  citySeed: 20261124,
+  // City grid: roads every 68 m, 16 m wide, nine roads each way.
+  roadPitch: 68,
+  roadWidth: 16,
+  roadCount: 9,
+  worldBound: 340,
+  beachZ: 300,
+  portX: 300,
+
+  // Player on foot.
+  walkSpeed: 6,
+  sprintSpeed: 9.5,
+  playerRadius: 0.55,
+  playerMaxHp: 100,
+
+  // Driving (arcade).
+  carMaxSpeed: 42, // m/s, about 151 km/h
+  carAccel: 16,
+  carBrake: 32,
+  carReverseMax: 12,
+  carTurnRate: 1.9,
+  handbrakeGripLoss: 0.45,
+  trafficSpeed: 11,
+
+  // Wanted level.
+  maxWanted: 5,
+  wantedDecaySeconds: 26, // one star fades after this long unseen
+  layLowRadius: 26,
+  policeChaseRange: 190,
+  roadblockStars: 4,
+
+  // Combat.
+  pistolDamage: 34,
+  pistolMag: 12,
+  pistolReserveStart: 48,
+  pistolRange: 70,
+  pistolFireInterval: 0.22,
+  meleeDamage: 20,
+  meleeRange: 2.4,
+  gunmanHp: 100,
+
+  // Economy.
+  startCash: 200,
+  missionRewards: [400, 600, 800, 1200, 2000],
+
+  // Look.
+  asphaltColor: 0x2b2e33,
+  sidewalkColor: 0x9aa0a6,
+  sandColor: 0xe9d6a4,
+  seaColor: 0x1f8fa8,
+  dockColor: 0x8b8f94,
+  cabinColor: 0x5a6b7a, // slate blue-grey, never pitch black
+  skyColor: 0x8fc7e8,
+  fogColor: 0xf2c98f,
+  sunColor: 0xffe3b3,
 };
 
 export const DISTRICTS = [
-  { name: 'DOWNTOWN', x0: -84, x1: 84, z0: -84, z1: 84 },
-  { name: 'OLD TOWN', x0: -240, x1: -84, z0: -240, z1: -28 },
-  { name: 'BAYFRONT BEACH', x0: -196, x1: 196, z0: 168, z1: 240 },
-  { name: 'MERIDIAN PORT', x0: -240, x1: -168, z0: -28, z1: 196 },
-  { name: 'MARINA', x0: 168, x1: 240, z0: -84, z1: 196 },
-  { name: 'PALM PARK', x0: 28, x1: 140, z0: 84, z1: 168 },
-  { name: 'NORTHSIDE', x0: -84, x1: 240, z0: -240, z1: -84 },
-  { name: 'HARBOUR VIEW', x0: -168, x1: 28, z0: 84, z1: 168 },
+  { name: 'BAYFRONT BEACH', test: (x, z) => z >= 268 },
+  { name: 'MERIDIAN PORT', test: (x, z) => x >= 292 && z < 292 },
+  { name: 'DOWNTOWN', test: (x, z) => Math.abs(x) < 140 && Math.abs(z) < 140 },
+  { name: 'OLD TOWN', test: (x, z) => x < -140 && z < 292 },
+  { name: 'MARINA DISTRICT', test: (x, z) => z < -140 && x >= -140 },
+  { name: 'HARBOR HEIGHTS', test: () => true },
 ];
 
 export function districtAt(x, z) {
-  for (const d of DISTRICTS) {
-    if (x >= d.x0 && x < d.x1 && z >= d.z0 && z < d.z1) return d.name;
-  }
+  for (const d of DISTRICTS) if (d.test(x, z)) return d.name;
   return 'MERIDIAN BAY';
 }
+
+export const WEAPONS = {
+  pistol: { name: '9MM PISTOL', icon: '▸', damage: CONFIG.pistolDamage, mag: CONFIG.pistolMag, range: CONFIG.pistolRange },
+  fists: { name: 'FISTS', icon: '✊', damage: CONFIG.meleeDamage, mag: 0, range: CONFIG.meleeRange },
+};
+
+export const CAR_COLORS = [
+  0xc94f4f, 0x4f7ec9, 0xe8c547, 0x7fb069, 0xd9d9d9, 0x3a3f4a,
+  0xe07b39, 0x8e6cc9, 0x4fb0c9, 0xb8b0a1, 0x5f8f7b, 0xc94f8e,
+];
+
+export const BUILDING_COLORS = [
+  0xf2e3c9, 0xe8c9a8, 0xd9e2e8, 0xf2d1c9, 0xcfe0d4, 0xe8e0c9,
+  0xd4c9e8, 0xf2e8d5, 0xc9d9e8, 0xe8c9c9, 0xd9e8c9, 0xe8d9b0,
+];

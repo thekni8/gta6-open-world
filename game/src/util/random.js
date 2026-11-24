@@ -1,8 +1,9 @@
-// Seeded random helpers: the city layout is deterministic for a seed, so
-// screenshots and playtests always see the same Meridian Bay.
+// Seeded random helpers. The city layout is deterministic: the same seed
+// always builds the same Meridian Bay, so screenshots and playtests agree.
+
 export function mulberry32(seed) {
   let a = seed >>> 0;
-  return function () {
+  return function next() {
     a |= 0;
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
@@ -16,24 +17,24 @@ export function makeRng(seed) {
   return {
     next,
     range(min, max) {
-      return min + (max - min) * next();
+      return min + next() * (max - min);
     },
     int(min, max) {
-      return Math.floor(min + (max - min + 1) * next());
+      return Math.floor(min + next() * (max - min + 1));
     },
-    pick(array) {
-      return array[Math.floor(next() * array.length)];
+    pick(list) {
+      return list[Math.floor(next() * list.length)];
     },
     chance(p) {
       return next() < p;
     },
-    shuffle(array) {
-      const copy = array.slice();
-      for (let i = copy.length - 1; i > 0; i--) {
-        const j = Math.floor(next() * (i + 1));
-        [copy[i], copy[j]] = [copy[j], copy[i]];
-      }
-      return copy;
-    },
   };
+}
+
+// A small stable hash for a grid cell, so per-block choices do not depend
+// on iteration order.
+export function hash2(x, z) {
+  let h = (x * 374761393 + z * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }

@@ -1,91 +1,78 @@
-// Wanted level: crimes add heat, heat bands map to 1–5 stars, and heat
-// decays while the police can't see the player — fast inside the hideout.
+// The wanted system: crimes raise heat, heat sets the star count, and
+// heat fades when the player is out of sight — faster inside a lay-low zone.
+
 import { CONFIG } from '../config.js';
 
-export class Wanted {
+export const CRIME_HEAT = {
+  stealCar: 25,
+  hitPed: 30,
+  hitCop: 40,
+  shoot: 8,
+  killPed: 50,
+  killCop: 60,
+  crashCop: 20,
+};
+
+const STAR_HEAT = [0, 15, 35, 55, 75, 90];
+
+export class WantedSystem {
   constructor() {
     this.heat = 0;
     this.stars = 0;
-    this.lastCrimeAt = 0;
-    this.seenTimer = 0;
-    this.bustTimer = 0;
+    this.unseenTimer = 0;
+    this.layLowZones = [
+      { x: -34, z: -34, r: CONFIG.layLowRadius, name: 'HIDEOUT' },
+      { x: 204, z: 204, r: 24, name: 'PARKING GARAGE' },
+      { x: -204, z: -204, r: 24, name: 'OLD TOWN ALLEY' },
+    ];
   }
 
-  commit(crime, game) {
-    const points = CONFIG.wanted[crime] || 10;
-    this.heat = Math.min(150, this.heat + points);
-    this.lastCrimeAt = game.time;
-    this._recomputeStars(game);
+  addCrime(type) {
+    const gain = CRIME_HEAT[type] ?? 10;
+    this.heat = Math.min(100, this.heat + gain);
+    this.unseenTimer = 0;
+    this.recompute();
   }
 
-  _recomputeStars(game) {
-    const bands = CONFIG.wanted.starBands;
+  setStars(n) {
+    this.stars = Math.max(0, Math.min(CONFIG.maxWanted, n));
+    this.heat = STAR_HEAT[this.stars] ?? 0;
+  }
+
+  recompute() {
     let stars = 0;
-    for (let i = 1; i < bands.length; i++) {
-      if (this.heat >= bands[i]) stars = i;
+    for (let i = 1; i <= CONFIG.maxWanted; i++) {
+      if (this.heat >= STAR_HEAT[i]) stars = i;
     }
-    if (stars !== this.stars) {
-      this.stars = stars;
-      if (game) game.onWantedChange(stars);
+    this.stars = stars;
+  }
+
+  inLayLowZone(x, z) {
+    for (const zone of this.layLowZones) {
+      if (Math.hypot(x - zone.x, z - zone.z) < zone.r) return zone;
+    }
+    return null;
+  }
+
+  // Call every frame. policeNear = a cruiser is within sight range.
+  update(dt, playerPos, policeNear) {
+    if (this.stars === 0) return;
+    const zone = this.inLayLowZone(playerPos.x, playerPos.z);
+    if (!policeNear || zone) {
+      this.unseenTimer += dt * (zone ? 2.5 : 1);
+      if (this.unseenTimer >= CONFIG.wantedDecaySeconds) {
+        this.unseenTimer = 0;
+        this.heat = Math.max(0, this.heat - 20);
+        this.recompute();
+      }
+    } else {
+      this.unseenTimer = 0;
     }
   }
 
   clear() {
     this.heat = 0;
     this.stars = 0;
-    this.bustTimer = 0;
-  }
-
-  setStars(n, game) {
-    const bands = CONFIG.wanted.starBands;
-    const clamped = Math.max(0, Math.min(5, n));
-    // Mid-band heat, so a few seconds of decay can't drop a star instantly.
-    this.heat = clamped < 5
-      ? (bands[clamped] + bands[clamped + 1]) / 2
-      : bands[5] + 10;
-    this._recomputeStars(game);
-  }
-
-  // Called every frame: decay heat, check bust, check "seen" state.
-  update(dt, game) {
-    const player = game.player;
-    // Is any police car close enough to see the player?
-    let seen = false;
-    for (const cop of game.police.cars) {
-      if (Math.hypot(cop.pos.x - player.pos.x, cop.pos.z - player.pos.z) < CONFIG.wanted.seenRadius) {
-        seen = true;
-        break;
-      }
-    }
-    this.seenTimer = seen ? 2.5 : Math.max(0, this.seenTimer - dt);
-    const effectivelySeen = seen || this.seenTimer > 0;
-
-    if (this.stars > 0 && !effectivelySeen) {
-      const inHideout = game.missions?.inHideout(player.pos.x, player.pos.z);
-      this.heat -= (inHideout ? CONFIG.wanted.hideoutDecay : CONFIG.wanted.decayPerSecond) * dt;
-      if (this.heat < 0) this.heat = 0;
-      this._recomputeStars(game);
-    }
-
-    // Busted: a police car sits on top of a slow, on-foot player.
-    if (this.stars > 0 && !player.inCar && !player.dead) {
-      let touching = false;
-      for (const cop of game.police.cars) {
-        if (Math.hypot(cop.pos.x - player.pos.x, cop.pos.z - player.pos.z) < CONFIG.wanted.bustRadius) {
-          touching = true;
-          break;
-        }
-      }
-      if (touching) {
-        this.bustTimer += dt;
-        if (this.bustTimer >= CONFIG.wanted.bustSeconds) {
-          game.busted();
-        }
-      } else {
-        this.bustTimer = 0;
-      }
-    } else {
-      this.bustTimer = 0;
-    }
+    this.unseenTimer = 0;
   }
 }
